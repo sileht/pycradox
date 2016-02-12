@@ -72,6 +72,7 @@ cdef extern from "rados/librados.h" nogil:
     ctypedef void* rados_ioctx_t
     ctypedef void* rados_xattrs_iter_t
     ctypedef void* rados_list_ctx_t
+    ctypedef uint64_t rados_snap_t
 
     cdef struct rados_cluster_stat_t:
         uint64_t kb
@@ -147,6 +148,7 @@ cdef extern from "rados/librados.h" nogil:
     void rados_ioctx_locator_set_key(rados_ioctx_t io, const char *key)
     void rados_ioctx_set_namespace(rados_ioctx_t io, const char * nspace)
 
+    uint64_t rados_get_last_version(rados_ioctx_t io)
     int rados_stat(rados_ioctx_t io, const char *o, uint64_t *psize, time_t *pmtime)
     int rados_write(rados_ioctx_t io, const char *oid, const char *buf, size_t len, uint64_t off)
     int rados_write_full(rados_ioctx_t io, const char *oid, const char *buf, size_t len)
@@ -164,6 +166,16 @@ cdef extern from "rados/librados.h" nogil:
     int rados_nobjects_list_open(rados_ioctx_t io, rados_list_ctx_t *ctx)
     int rados_nobjects_list_next(rados_list_ctx_t ctx, const char **entry, const char **key, const char **nspace)
     void rados_nobjects_list_close(rados_list_ctx_t ctx)
+
+    int rados_ioctx_snap_rollback(rados_ioctx_t io, const char * oid, const char * snapname)
+    int rados_ioctx_snap_create(rados_ioctx_t io, const char * snapname)
+    int rados_ioctx_snap_remove(rados_ioctx_t io, const char * snapname)
+    int rados_ioctx_snap_lookup(rados_ioctx_t io, const char * name, rados_snap_t * id)
+    int rados_ioctx_snap_get_name(rados_ioctx_t io, rados_snap_t id, char * name, int maxlen)
+    void rados_ioctx_snap_set_read(rados_ioctx_t io, rados_snap_t snap)
+    int rados_ioctx_snap_list(rados_ioctx_t io, rados_snap_t * snaps, int maxlen)
+    int rados_ioctx_snap_get_stamp(rados_ioctx_t io, rados_snap_t id, time_t * t)
+
 
 
 LIBRADOS_OP_FLAG_EXCL = _LIBRADOS_OP_FLAG_EXCL
@@ -339,11 +351,8 @@ def requires(*types):
     return wrapper
 
 
-cdef rados_ioctx_t convert_ioctx(ioctx) except? NULL:
-    return <rados_ioctx_t><uintptr_t>ioctx.io.value
-
-cdef int no_op_progress_callback(uint64_t offset, uint64_t total, void* ptr):
-    return 0
+#cdef int no_op_progress_callback(uint64_t offset, uint64_t total, void* ptr):
+#    return 0
 
 
 def cstr(val, name, encoding="utf-8", opt=False):
@@ -593,7 +602,7 @@ Rados object in state %s." % self.state)
         cdef:
             char *_option = option
             size_t length = 20
-            char *retbuf = NULL
+            char *ret_buf = NULL
 
         try:
             while True:
@@ -1199,9 +1208,9 @@ cdef class ObjectIterator(object):
         :returns: next rados.Ioctx Object
         """
         cdef:
-            char *key_ = NULL
-            char *locator_ = NULL
-            char *nspace_ = NULL
+            const char *key_ = NULL
+            const char *locator_ = NULL
+            const char *nspace_ = NULL
 
         with nogil:
             # FIXME(sileht): locator nspace
@@ -1252,8 +1261,8 @@ cdef class XattrIterator(object):
         :returns: pair - of name and value of the next Xattr
         """
         cdef:
-            char *name_ = NULL
-            char *val_ = NULL
+            const char *name_ = NULL
+            const char *val_ = NULL
             size_t len_ = 0
 
         with nogil:
@@ -1277,60 +1286,81 @@ cdef class SnapIterator(object):
 
     cdef public Ioctx ioctx
 
-    def __init__(self, ioctx):
+    cdef rados_snap_t *snaps
+    cdef int max_snap
+    cdef int cur_snap
+
+    def __cinit__(self, Ioctx ioctx):
         self.ioctx = ioctx
         # We don't know how big a buffer we need until we've called the
         # function. So use the exponential doubling strategy.
-#        num_snaps = 10
-#        while True:
-#            self.snaps = (ctypes.c_uint64 * num_snaps)()
-#            ret = run_in_thread(self.ioctx.librados.rados_ioctx_snap_list,
-#                                (self.ioctx.io, self.snaps, c_int(num_snaps)))
-#            if (ret >= 0):
-#                self.max_snap = ret
-#                break
-#            elif (ret != -errno.ERANGE):
-#                raise make_ex(ret, "error calling rados_snap_list for \
-#ioctx '%s'" % self.ioctx.name)
-#            num_snaps = num_snaps * 2
-#        self.cur_snap = 0
-#
-#    def __iter__(self):
-#        return self
-#
-#    def next(self):
-#        return self.__next__()
-#
-#    def __next__(self):
-#        """
-#        Get the next Snapshot
-#
-#        :raises: :class:`Error`, StopIteration
-#        :returns: Snap - next snapshot
-#        """
-#        if (self.cur_snap >= self.max_snap):
-#            raise StopIteration
-#        snap_id = self.snaps[self.cur_snap]
-#        name_len = 10
-#        while True:
-#            name = create_string_buffer(name_len)
-#            ret = run_in_thread(self.ioctx.librados.rados_ioctx_snap_get_name,
-#                                (self.ioctx.io, c_uint64(snap_id), byref(name),
-#                                 c_int(name_len)))
-#            if (ret == 0):
-#                name_len = ret
-#                break
-#            elif (ret != -errno.ERANGE):
-#                raise make_ex(ret, "rados_snap_get_name error")
-#            name_len = name_len * 2
-#        snap = Snap(self.ioctx, decode_cstr(name), snap_id)
-#        self.cur_snap = self.cur_snap + 1
-#        return snap
+        cdef int num_snaps = 10
+        while True:
+            self.snaps = <rados_snap_t*>realloc_chk(self.snaps,
+                                                    num_snaps *
+                                                    sizeof(rados_snap_t))
+
+            with nogil:
+                ret = rados_ioctx_snap_list(ioctx.io, self.snaps, num_snaps)
+            if (ret >= 0):
+                self.max_snap = ret
+                break
+            elif (ret != -errno.ERANGE):
+                raise make_ex(ret, "error calling rados_snap_list for \
+ioctx '%s'" % self.ioctx.name)
+            num_snaps = num_snaps * 2
+        self.cur_snap = 0
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.__next__()
+
+    def __next__(self):
+        """
+        Get the next Snapshot
+
+        :raises: :class:`Error`, StopIteration
+        :returns: Snap - next snapshot
+        """
+        if (self.cur_snap >= self.max_snap):
+            raise StopIteration
+
+        cdef:
+            rados_snap_t snap_id = self.snaps[self.cur_snap]
+            int name_len = 10
+            char *name = NULL
+
+        try:
+            while True:
+                name = <char *>realloc_chk(name, name_len)
+                with nogil:
+                    ret = rados_ioctx_snap_get_name(self.ioctx.io, snap_id, name, name_len)
+                if (ret == 0):
+                    name_len = ret
+                    break
+                elif (ret != -errno.ERANGE):
+                    raise make_ex(ret, "rados_snap_get_name error")
+                name_len = name_len * 2
+
+            snap = Snap(self.ioctx, name, snap_id)
+            self.cur_snap = self.cur_snap + 1
+            return snap
+        finally:
+            free(name)
 
 
-class Snap(object):
+cdef class Snap(object):
     """Snapshot object"""
-    def __init__(self, ioctx, name, snap_id):
+    cdef public Ioctx ioctx
+    cdef public char* name
+
+    # NOTE(sileht): old API was storing the ctypes object 
+    # instead of the value ....
+    cdef public rados_snap_t snap_id
+
+    def __cinit__(self, Ioctx ioctx, char* name, rados_snap_t snap_id):
         self.ioctx = ioctx
         self.name = name
         self.snap_id = snap_id
@@ -1339,19 +1369,20 @@ class Snap(object):
         return "rados.Snap(ioctx=%s,name=%s,snap_id=%d)" \
             % (str(self.ioctx), self.name, self.snap_id)
 
-#    def get_timestamp(self):
-#        """
-#        Find when a snapshot in the current pool occurred
-#
-#        :raises: :class:`Error`
-#        :returns: datetime - the data and time the snapshot was created
-#        """
-#        snap_time = c_long(0)
-#        ret = run_in_thread(self.ioctx.librados.rados_ioctx_snap_get_stamp,
-#                            (self.ioctx.io, self.snap_id, byref(snap_time)))
-#        if (ret != 0):
-#            raise make_ex(ret, "rados_ioctx_snap_get_stamp error")
-#        return datetime.fromtimestamp(snap_time.value)
+    def get_timestamp(self):
+        """
+        Find when a snapshot in the current pool occurred
+
+        :raises: :class:`Error`
+        :returns: datetime - the data and time the snapshot was created
+        """
+        cdef time_t snap_time
+
+        with nogil:
+            ret = rados_ioctx_snap_get_stamp(self.ioctx.io, self.snap_id, &snap_time)
+        if (ret != 0):
+            raise make_ex(ret, "rados_ioctx_snap_get_stamp error")
+        return datetime.fromtimestamp(snap_time)
 
 
 class Completion(object):
@@ -1799,22 +1830,23 @@ cdef class Ioctx(object):
         """
         return self.locator_key
 
-#    @requires(('snap_id', int))
-#    def set_read(self, snap_id):
-#        """
-#        Set the snapshot for reading objects.
-#
-#        To stop to read from snapshot, use set_read(LIBRADOS_SNAP_HEAD)
-#
-#        :param snap_id: the snapshot Id
-#        :type snap_id: int
-#
-#        :raises: :class:`TypeError`
-#        """
-#        self.require_ioctx_open()
-#        run_in_thread(self.librados.rados_ioctx_snap_set_read,
-#                      (self.io, c_uint64(snap_id)))
-#
+    #@requires(('snap_id', int))
+    def set_read(self, snap_id):
+        """
+        Set the snapshot for reading objects.
+
+        To stop to read from snapshot, use set_read(LIBRADOS_SNAP_HEAD)
+
+        :param snap_id: the snapshot Id
+        :type snap_id: int
+
+        :raises: :class:`TypeError`
+        """
+        self.require_ioctx_open()
+        cdef rados_snap_t _snap_id = snap_id
+        with nogil:
+            rados_ioctx_snap_set_read(self.io, _snap_id)
+
     @requires(('nspace', str_type))
     def set_namespace(self, nspace):
         """
@@ -2301,100 +2333,118 @@ returned %d, but should return zero on success." % (self.name, ret))
         self.require_ioctx_open()
         return ObjectIterator(self)
 
-#    def list_snaps(self):
-#        """
-#        Get SnapIterator on rados.Ioctx object.
-#
-#        :returns: SnapIterator
-#        """
-#        self.require_ioctx_open()
-#        return SnapIterator(self)
-#
-#    @requires(('snap_name', str_type))
-#    def create_snap(self, snap_name):
-#        """
-#        Create a pool-wide snapshot
-#
-#        :param snap_name: the name of the snapshot
-#        :type snap_name: str
-#
-#        :raises: :class:`TypeError`
-#        :raises: :class:`Error`
-#        """
-#        self.require_ioctx_open()
-#        ret = run_in_thread(self.librados.rados_ioctx_snap_create,
-#                            (self.io, cstr(snap_name)))
-#        if (ret != 0):
-#            raise make_ex(ret, "Failed to create snap %s" % snap_name)
-#
-#    @requires(('snap_name', str_type))
-#    def remove_snap(self, snap_name):
-#        """
-#        Removes a pool-wide snapshot
-#
-#        :param snap_name: the name of the snapshot
-#        :type snap_name: str
-#
-#        :raises: :class:`TypeError`
-#        :raises: :class:`Error`
-#        """
-#        self.require_ioctx_open()
-#        ret = run_in_thread(self.librados.rados_ioctx_snap_remove,
-#                            (self.io, cstr(snap_name)))
-#        if (ret != 0):
-#            raise make_ex(ret, "Failed to remove snap %s" % snap_name)
-#
-#    @requires(('snap_name', str_type))
-#    def lookup_snap(self, snap_name):
-#        """
-#        Get the id of a pool snapshot
-#
-#        :param snap_name: the name of the snapshot to lookop
-#        :type snap_name: str
-#
-#        :raises: :class:`TypeError`
-#        :raises: :class:`Error`
-#        :returns: Snap - on success
-#        """
-#        self.require_ioctx_open()
-#        snap_id = c_uint64()
-#        ret = run_in_thread(self.librados.rados_ioctx_snap_lookup,
-#                            (self.io, cstr(snap_name), byref(snap_id)))
-#        if (ret != 0):
-#            raise make_ex(ret, "Failed to lookup snap %s" % snap_name)
-#        return Snap(self, snap_name, snap_id)
-#
-#    @requires(('oid', str_type), ('snap_name', str_type))
-#    def snap_rollback(self, oid, snap_name):
-#        """
-#        Rollback an object to a snapshot
-#
-#        :param oid: the name of the object
-#        :type oid: str
-#        :param snap_name: the name of the snapshot
-#        :type snap_name: str
-#
-#        :raises: :class:`TypeError`
-#        :raises: :class:`Error`
-#        """
-#        self.require_ioctx_open()
-#        ret = run_in_thread(self.librados.rados_ioctx_snap_rollback,
-#                            (self.io, cstr(oid), cstr(snap_name)))
-#        if (ret != 0):
-#            raise make_ex(ret, "Failed to rollback %s" % oid)
-#
-#    def get_last_version(self):
-#        """
-#        Return the version of the last object read or written to.
-#
-#        This exposes the internal version number of the last object read or
-#        written via this io context
-#
-#        :returns: version of the last object used
-#        """
-#        self.require_ioctx_open()
-#        return run_in_thread(self.librados.rados_get_last_version, (self.io,))
-#
+    def list_snaps(self):
+        """
+        Get SnapIterator on rados.Ioctx object.
+
+        :returns: SnapIterator
+        """
+        self.require_ioctx_open()
+        return SnapIterator(self)
+
+    @requires(('snap_name', str_type))
+    def create_snap(self, snap_name):
+        """
+        Create a pool-wide snapshot
+
+        :param snap_name: the name of the snapshot
+        :type snap_name: str
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        """
+        self.require_ioctx_open()
+        snap_name = cstr(snap_name, 'snap_name')
+        cdef char *_snap_name = snap_name
+
+        with nogil:
+            ret = rados_ioctx_snap_create(self.io, _snap_name)
+        if (ret != 0):
+            raise make_ex(ret, "Failed to create snap %s" % snap_name)
+
+    @requires(('snap_name', str_type))
+    def remove_snap(self, snap_name):
+        """
+        Removes a pool-wide snapshot
+
+        :param snap_name: the name of the snapshot
+        :type snap_name: str
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        """
+        self.require_ioctx_open()
+        snap_name = cstr(snap_name, 'snap_name')
+        cdef char *_snap_name = snap_name
+
+        with nogil:
+            ret = rados_ioctx_snap_remove(self.io, _snap_name)
+        if (ret != 0):
+            raise make_ex(ret, "Failed to remove snap %s" % snap_name)
+
+    @requires(('snap_name', str_type))
+    def lookup_snap(self, snap_name):
+        """
+        Get the id of a pool snapshot
+
+        :param snap_name: the name of the snapshot to lookop
+        :type snap_name: str
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        :returns: Snap - on success
+        """
+        self.require_ioctx_open()
+        snap_name = cstr(snap_name, 'snap_name')
+        cdef: 
+            char *_snap_name = snap_name
+            rados_snap_t snap_id
+
+        with nogil:
+            ret = rados_ioctx_snap_lookup(self.io, _snap_name, &snap_id)
+        if (ret != 0):
+            raise make_ex(ret, "Failed to lookup snap %s" % snap_name)
+        return Snap(self, snap_name, int(snap_id))
+
+    @requires(('oid', str_type), ('snap_name', str_type))
+    def snap_rollback(self, oid, snap_name):
+        """
+        Rollback an object to a snapshot
+
+        :param oid: the name of the object
+        :type oid: str
+        :param snap_name: the name of the snapshot
+        :type snap_name: str
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        """
+        self.require_ioctx_open()
+        oid = cstr(oid, 'oid')
+        snap_name = cstr(snap_name, 'snap_name')
+        cdef:
+            char *_snap_name = snap_name
+            char *_oid = oid
+
+        with nogil:
+            ret = rados_ioctx_snap_rollback(self.io, _oid, _snap_name)
+        if (ret != 0):
+            raise make_ex(ret, "Failed to rollback %s" % oid)
+
+    def get_last_version(self):
+        """
+        Return the version of the last object read or written to.
+
+        This exposes the internal version number of the last object read or
+        written via this io context
+
+        :returns: version of the last object used
+        """
+        self.require_ioctx_open()
+        with nogil:
+            ret = rados_get_last_version(self.io)
+        return int(ret)
+
 #    def create_write_op(self):
 #        """
 #        create write operation object.

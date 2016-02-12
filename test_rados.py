@@ -246,6 +246,9 @@ class TestIoctx(object):
         self.rados.delete_pool('test_pool')
         self.rados.shutdown()
 
+    def test_get_last_version(self):
+        version = self.ioctx.get_last_version()
+
     def test_change_auid(self):
         self.ioctx.change_auid(ANONYMOUS_AUID)
         self.ioctx.change_auid(ADMIN_AUID)
@@ -374,7 +377,7 @@ class TestIoctx(object):
         self.ioctx.create_snap("snap1")
         self.ioctx.remove_object("insnap")
         snap = self.ioctx.lookup_snap("snap1")
-        self.ioctx.set_read(int(snap.snap_id.value))
+        self.ioctx.set_read(snap.snap_id)
         eq(self.ioctx.read("insnap"), b"contents1")
         self.ioctx.set_read(LIBRADOS_SNAP_HEAD)
         self.ioctx.write("inhead", b"contents2")
