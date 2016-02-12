@@ -44,7 +44,9 @@ setup(
             ["cradox.pyx"],
             libraries=["rados"]
             )
-    ], build_dir=os.environ.get("CYTHON_BUILD_DIR", None)),
+    ], build_dir=os.environ.get("CYTHON_BUILD_DIR", None), 
+    output_dir=".",
+    gdb_debug=True),
     cmdclass={
         "egg_info": EggInfoCommand,
     },

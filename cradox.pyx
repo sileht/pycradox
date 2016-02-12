@@ -38,8 +38,6 @@ else:
     str_type = str
 
 
-
-
 cdef extern from "Python.h":
     # These are in cpython/string.pxd, but use "object" types instead of
     # PyObject*, which invokes assumptions in cpython that we need to
@@ -48,6 +46,7 @@ cdef extern from "Python.h":
     PyObject *PyBytes_FromStringAndSize(char *v, Py_ssize_t len) except NULL
     char* PyBytes_AsString(PyObject *string) except NULL
     int _PyBytes_Resize(PyObject **string, Py_ssize_t newsize) except -1
+    void PyEval_InitThreads()
 
 
 cdef extern from "time.h":
@@ -182,7 +181,6 @@ cdef extern from "rados/librados.h" nogil:
     int rados_ioctx_snap_list(rados_ioctx_t io, rados_snap_t * snaps, int maxlen)
     int rados_ioctx_snap_get_stamp(rados_ioctx_t io, rados_snap_t id, time_t * t)
 
-
     int rados_lock_exclusive(rados_ioctx_t io, const char * oid, const char * name, 
                              const char * cookie, const char * desc, 
                              timeval * duration, uint8_t flags)
@@ -191,6 +189,36 @@ cdef extern from "rados/librados.h" nogil:
                           timeval * duration, uint8_t flags)
     int rados_unlock(rados_ioctx_t io, const char * o, const char * name, const char * cookie)
 
+    ctypedef void *rados_write_op_t
+    rados_write_op_t rados_create_write_op()
+    void rados_release_write_op(rados_write_op_t write_op)
+
+    ctypedef void *rados_read_op_t
+    rados_read_op_t rados_create_read_op()
+    void rados_release_read_op(rados_read_op_t read_op)
+
+    ctypedef void *rados_completion_t
+    ctypedef void (*rados_callback_t)(rados_completion_t cb, void *arg)
+
+    int rados_aio_create_completion(void * cb_arg, rados_callback_t cb_complete, rados_callback_t cb_safe, rados_completion_t * pc)
+    void rados_aio_release(rados_completion_t c)
+    int rados_aio_write(rados_ioctx_t io, const char * oid, rados_completion_t completion, const char * buf, size_t len, uint64_t off)
+    int rados_aio_append(rados_ioctx_t io, const char * oid, rados_completion_t completion, const char * buf, size_t len)
+    int rados_aio_write_full(rados_ioctx_t io, const char * oid, rados_completion_t completion, const char * buf, size_t len)
+    int rados_aio_remove(rados_ioctx_t io, const char * oid, rados_completion_t completion)
+    int rados_aio_read(rados_ioctx_t io, const char * oid, rados_completion_t completion, char * buf, size_t len, uint64_t off)
+    int rados_aio_flush(rados_ioctx_t io)
+
+    int rados_aio_get_return_value(rados_completion_t c)
+    int rados_aio_wait_for_complete_and_cb(rados_completion_t c)
+    int rados_aio_wait_for_safe_and_cb(rados_completion_t c)
+    int rados_aio_wait_for_complete(rados_completion_t c)
+    int rados_aio_wait_for_safe(rados_completion_t c)
+    int rados_aio_is_complete(rados_completion_t c)
+    int rados_aio_is_safe(rados_completion_t c)
+
+    int rados_exec(rados_ioctx_t io, const char * oid, const char * cls, const char * method,
+                   const char * in_buf, size_t in_len, char * buf, size_t out_len)
 
 
 LIBRADOS_OP_FLAG_EXCL = _LIBRADOS_OP_FLAG_EXCL
@@ -448,6 +476,8 @@ cdef class Rados(object):
     def __init__(self, rados_id=None, name=None, clustername=None,
                  conf_defaults=None, conffile=None, conf=None, flags=0):
 
+        PyEval_InitThreads()
+
         # TODO(sileht): fill me
         #self.parsed_args = []
         #self.conf_defaults = conf_defaults
@@ -559,10 +589,6 @@ Rados object in state %s." % self.state)
         if not args:
             return
         
-        # create instances of arrays of c_char_p's, both len(args) long
-        # cretargs will always be a subset of cargs (perhaps identical)
-        #cargs = (c_char_p * len(args))(*map(cstr, args))
-        #cretargs = (c_char_p * len(args))()
         cdef:
             int _argc = len(args)
             const char **_argv = <const char **>to_cstring_array(args)
@@ -1400,157 +1426,196 @@ cdef class Snap(object):
         return datetime.fromtimestamp(snap_time)
 
 
-class Completion(object):
+cdef class Completion(object):
     """completion object"""
-    def __init__(self, ioctx, rados_comp, oncomplete, onsafe,
-                 complete_cb, safe_cb):
-        self.rados_comp = rados_comp
+
+    cdef public:
+         Ioctx ioctx
+         object oncomplete 
+         object onsafe 
+
+    cdef:
+         rados_callback_t complete_cb
+         rados_callback_t safe_cb
+         rados_completion_t rados_comp
+
+    def __cinit__(self, Ioctx ioctx, object oncomplete, object onsafe):
         self.oncomplete = oncomplete
         self.onsafe = onsafe
         self.ioctx = ioctx
-        self.complete_cb = complete_cb
-        self.safe_cb = safe_cb
 
-#    def is_safe(self):
-#        """
-#        Is an asynchronous operation safe?
-#
-#        This does not imply that the safe callback has finished.
-#
-#        :returns: True if the operation is safe
-#        """
-#        return run_in_thread(self.ioctx.librados.rados_aio_is_safe,
-#                             (self.rados_comp,)) == 1
-#
-#    def is_complete(self):
-#        """
-#        Has an asynchronous operation completed?
-#
-#        This does not imply that the safe callback has finished.
-#
-#        :returns: True if the operation is completed
-#        """
-#        return run_in_thread(self.ioctx.librados.rados_aio_is_complete,
-#                             (self.rados_comp,)) == 1
-#
-#    def wait_for_safe(self):
-#        """
-#        Wait for an asynchronous operation to be marked safe
-#
-#        This does not imply that the safe callback has finished.
-#        """
-#        run_in_thread(self.ioctx.librados.rados_aio_wait_for_safe,
-#                      (self.rados_comp,))
-#
-#    def wait_for_complete(self):
-#        """
-#        Wait for an asynchronous operation to complete
-#
-#        This does not imply that the complete callback has finished.
-#        """
-#        run_in_thread(self.ioctx.librados.rados_aio_wait_for_complete,
-#                      (self.rados_comp,))
-#
-#    def wait_for_safe_and_cb(self):
-#        """
-#        Wait for an asynchronous operation to be marked safe and for
-#        the safe callback to have returned
-#        """
-#        run_in_thread(self.ioctx.librados.rados_aio_wait_for_safe_and_cb,
-#                      (self.rados_comp,))
-#
-#    def wait_for_complete_and_cb(self):
-#        """
-#        Wait for an asynchronous operation to complete and for the
-#        complete callback to have returned
-#
-#        :returns:  whether the operation is completed
-#        """
-#        return run_in_thread(
-#            self.ioctx.librados.rados_aio_wait_for_complete_and_cb,
-#            (self.rados_comp,)
-#        )
-#
-#    def get_return_value(self):
-#        """
-#        Get the return value of an asychronous operation
-#
-#        The return value is set when the operation is complete or safe,
-#        whichever comes first.
-#
-#        :returns: int - return value of the operation
-#        """
-#        return run_in_thread(self.ioctx.librados.rados_aio_get_return_value,
-#                             (self.rados_comp,))
-#
-#    def __del__(self):
-#        """
-#        Release a completion
-#
-#        Call this when you no longer need the completion. It may not be
-#        freed immediately if the operation is not acked and committed.
-#        """
-#        run_in_thread(self.ioctx.librados.rados_aio_release,
-#                      (self.rados_comp,))
-#
+        # FIXME(sileht): removed this is c reference not 
+        #self.complete_cb = complete_cb
+        #self.safe_cb = safe_cb
 
-class WriteOpCtx(object):
+    def is_safe(self):
+        """
+        Is an asynchronous operation safe?
+
+        This does not imply that the safe callback has finished.
+
+        :returns: True if the operation is safe
+        """
+        with nogil:
+            ret = rados_aio_is_safe(self.rados_comp) 
+        return ret == 1
+
+    def is_complete(self):
+        """
+        Has an asynchronous operation completed?
+
+        This does not imply that the safe callback has finished.
+
+        :returns: True if the operation is completed
+        """
+        with nogil:
+            ret = rados_aio_is_complete(self.rados_comp)
+        return ret == 1
+
+    def wait_for_safe(self):
+        """
+        Wait for an asynchronous operation to be marked safe
+
+        This does not imply that the safe callback has finished.
+        """
+        with nogil:
+            rados_aio_wait_for_safe(self.rados_comp)
+
+    def wait_for_complete(self):
+        """
+        Wait for an asynchronous operation to complete
+
+        This does not imply that the complete callback has finished.
+        """
+        with nogil:
+            rados_aio_wait_for_complete(self.rados_comp)
+
+    def wait_for_safe_and_cb(self):
+        """
+        Wait for an asynchronous operation to be marked safe and for
+        the safe callback to have returned
+        """
+        with nogil:
+            rados_aio_wait_for_safe_and_cb(self.rados_comp)
+
+    def wait_for_complete_and_cb(self):
+        """
+        Wait for an asynchronous operation to complete and for the
+        complete callback to have returned
+
+        :returns:  whether the operation is completed
+        """
+        with nogil:
+            ret = rados_aio_wait_for_complete_and_cb(self.rados_comp)
+        return ret
+
+    def get_return_value(self):
+        """
+        Get the return value of an asychronous operation
+
+        The return value is set when the operation is complete or safe,
+        whichever comes first.
+
+        :returns: int - return value of the operation
+        """
+        with nogil:
+            ret = rados_aio_get_return_value(self.rados_comp)
+        return ret
+
+    def __del__(self):
+        """
+        Release a completion
+
+        Call this when you no longer need the completion. It may not be
+        freed immediately if the operation is not acked and committed.
+        """
+        with nogil:
+            rados_aio_release(self.rados_comp)
+
+cdef class WriteOpCtx(object):
     """write operation context manager"""
-    def __init__(self, ioctx):
-        self.ioctx = ioctx
 
-#    def __enter__(self):
-#        self.ioctx.librados.rados_create_write_op.restype = c_void_p
-#        ret = run_in_thread(self.ioctx.librados.rados_create_write_op, (None,))
-#        self.write_op = ret
-#        return ret
-#
-#    def __exit__(self, type, msg, traceback):
-#        self.ioctx.librados.rados_release_write_op.argtypes = [c_void_p]
-#        run_in_thread(self.ioctx.librados.rados_release_write_op, (c_void_p(self.write_op),))
+    cdef rados_write_op_t write_op
+
+    def __enter__(self):
+        with nogil:
+            self.write_op = rados_create_write_op()
+        # NOTE(sileht): using pointer outside of the python list is not 
+        # very nice, but keep compat with older lib.
+        return int(<uintptr_t>self.write_op)
+
+    def __exit__(self, type, msg, traceback):
+        with nogil:
+            rados_release_write_op(self.write_op)
 
 
-class ReadOpCtx(object):
+cdef class ReadOpCtx(object):
     """read operation context manager"""
-    def __init__(self, ioctx):
-        self.ioctx = ioctx
 
-#    def __enter__(self):
-#        self.ioctx.librados.rados_create_read_op.restype = c_void_p
-#        ret = run_in_thread(self.ioctx.librados.rados_create_read_op, (None,))
-#        self.read_op = ret
-#        return ret
-#
-#    def __exit__(self, type, msg, traceback):
-#        self.ioctx.librados.rados_release_read_op.argtypes = [c_void_p]
-#        run_in_thread(self.ioctx.librados.rados_release_read_op, (c_void_p(self.read_op),))
+    cdef rados_read_op_t read_op
+
+    def __enter__(self):
+        with nogil:
+            self.read_op = rados_create_read_op()
+        # NOTE(sileht): using pointer outside of the python list is not 
+        # very nice, but keep compat with older lib.
+        return int(<uintptr_t>self.read_op)
+
+    def __exit__(self, type, msg, traceback):
+        with nogil:
+            rados_release_read_op(self.read_op)
 
 
-#RADOS_CB = CFUNCTYPE(c_int, c_void_p, c_void_p)
+cdef int __aio_safe_cb(rados_completion_t completion, void *args) with gil:
+    """
+    Callback to onsafe() for asynchronous operations
+    """
+    cdef object cb = <object>args
+    cb.onsafe(cb)
+    return 0
+
+    cdef object io = <object>args
+    cb = None
+    with io.lock:
+        cb = io.safe_cbs[<uintptr_t>completion]
+        del io.safe_cbs[<uintptr_t>completion]
+    cb.onsafe(cb)
+    return 0
+
+
+cdef int __aio_complete_cb(rados_completion_t completion, void *args) with gil:
+    """
+    Callback to oncomplete() for asynchronous operations
+    """
+    cdef object cb = <object>args
+    cb.oncomplete(cb)
+    return 0
+
+    cdef object io = <object>args
+    cb = None
+    with io.lock:
+        cb = io.complete_cbs[<uintptr_t>completion]
+        del io.complete_cbs[<uintptr_t>completion]
+    cb.oncomplete(cb)
+    return 0
 
 
 cdef class Ioctx(object):
+    """rados.Ioctx object"""
+
     cdef:
         rados_ioctx_t io
         public char *name
         public char *state
         public char *locator_key
         public char *nspace
-        public object safe_cbs  # dict
-        public object complete_cbs  # dict
-        public object lock  # theading.Lock()
 
-
-    """rados.Ioctx object"""
     def __init__(self, name):
         self.name = name
         self.state = "open"
 
         self.locator_key = ""
         self.nspace = ""
-        self.safe_cbs = {}
-        self.complete_cbs = {}
-        self.lock = threading.Lock()
 
     def __enter__(self):
         return self
@@ -1561,169 +1626,178 @@ cdef class Ioctx(object):
 
     def __del__(self):
         self.close()
+    cdef __get_completion(self, oncomplete, onsafe):
+        """
+        Constructs a completion to use with asynchronous operations
 
-    def __aio_safe_cb(self, completion, _):
-        """
-        Callback to onsafe() for asynchronous operations
-        """
-        cb = None
-        with self.lock:
-            cb = self.safe_cbs[completion]
-            del self.safe_cbs[completion]
-        cb.onsafe(cb)
-        return 0
+        :param oncomplete: what to do when the write is safe and complete in memory
+            on all replicas
+        :type oncomplete: completion
+        :param onsafe:  what to do when the write is safe and complete on storage
+            on all replicas
+        :type onsafe: completion
 
-    def __aio_complete_cb(self, completion, _):
+        :raises: :class:`Error`
+        :returns: completion object
         """
-        Callback to oncomplete() for asynchronous operations
-        """
-        cb = None
-        with self.lock:
-            cb = self.complete_cbs[completion]
-            del self.complete_cbs[completion]
-        cb.oncomplete(cb)
-        return 0
+        
+        completion_obj = Completion(self, oncomplete, onsafe)
+        
+        cdef:
+            rados_callback_t complete_cb = NULL
+            rados_callback_t safe_cb = NULL
+            rados_completion_t completion 
+            PyObject* p_completion_obj= <PyObject*>completion_obj
 
-#    def __get_completion(self, oncomplete, onsafe):
-#        """
-#        Constructs a completion to use with asynchronous operations
-#
-#        :param oncomplete: what to do when the write is safe and complete in memory
-#            on all replicas
-#        :type oncomplete: completion
-#        :param onsafe:  what to do when the write is safe and complete on storage
-#            on all replicas
-#        :type onsafe: completion
-#
-#        :raises: :class:`Error`
-#        :returns: completion object
-#        """
-#        completion = c_void_p(0)
-#        complete_cb = None
-#        safe_cb = None
-#        if oncomplete:
-#            complete_cb = RADOS_CB(self.__aio_complete_cb)
-#        if onsafe:
-#            safe_cb = RADOS_CB(self.__aio_safe_cb)
-#        ret = run_in_thread(self.librados.rados_aio_create_completion,
-#                            (c_void_p(0), complete_cb, safe_cb,
-#                             byref(completion)))
-#        if ret < 0:
-#            raise make_ex(ret, "error getting a completion")
-#        with self.lock:
-#            completion_obj = Completion(self, completion, oncomplete, onsafe,
-#                                        complete_cb, safe_cb)
-#            if oncomplete:
-#                self.complete_cbs[completion.value] = completion_obj
-#            if onsafe:
-#                self.safe_cbs[completion.value] = completion_obj
-#        return completion_obj
-#
-#    def aio_write(self, object_name, to_write, offset=0,
-#                  oncomplete=None, onsafe=None):
-#        """
-#        Write data to an object asynchronously
-#
-#        Queues the write and returns.
-#
-#        :param object_name: name of the object
-#        :type object_name: str
-#        :param to_write: data to write
-#        :type to_write: str
-#        :param offset: byte offset in the object to begin writing at
-#        :type offset: int
-#        :param oncomplete: what to do when the write is safe and complete in memory
-#            on all replicas
-#        :type oncomplete: completion
-#        :param onsafe:  what to do when the write is safe and complete on storage
-#            on all replicas
-#        :type onsafe: completion
-#
-#        :raises: :class:`Error`
-#        :returns: completion object
-#        """
-#        completion = self.__get_completion(oncomplete, onsafe)
-#        ret = run_in_thread(self.librados.rados_aio_write,
-#                            (self.io, cstr(object_name),
-#                             completion.rados_comp, c_char_p(to_write),
-#                             c_size_t(len(to_write)), c_uint64(offset)))
-#        if ret < 0:
-#            raise make_ex(ret, "error writing object %s" % object_name)
-#        return completion
-#
-#    def aio_write_full(self, object_name, to_write,
-#                       oncomplete=None, onsafe=None):
-#        """
-#        Asychronously write an entire object
-#
-#        The object is filled with the provided data. If the object exists,
-#        it is atomically truncated and then written.
-#        Queues the write and returns.
-#
-#        :param object_name: name of the object
-#        :type object_name: str
-#        :param to_write: data to write
-#        :type to_write: str
-#        :param oncomplete: what to do when the write is safe and complete in memory
-#            on all replicas
-#        :type oncomplete: completion
-#        :param onsafe:  what to do when the write is safe and complete on storage
-#            on all replicas
-#        :type onsafe: completion
-#
-#        :raises: :class:`Error`
-#        :returns: completion object
-#        """
-#        completion = self.__get_completion(oncomplete, onsafe)
-#        ret = run_in_thread(self.librados.rados_aio_write_full,
-#                            (self.io, cstr(object_name),
-#                             completion.rados_comp, c_char_p(to_write),
-#                             c_size_t(len(to_write))))
-#        if ret < 0:
-#            raise make_ex(ret, "error writing object %s" % object_name)
-#        return completion
-#
-#    def aio_append(self, object_name, to_append, oncomplete=None, onsafe=None):
-#        """
-#        Asychronously append data to an object
-#
-#        Queues the write and returns.
-#
-#        :param object_name: name of the object
-#        :type object_name: str
-#        :param to_append: data to append
-#        :type to_append: str
-#        :param offset: byte offset in the object to begin writing at
-#        :type offset: int
-#        :param oncomplete: what to do when the write is safe and complete in memory
-#            on all replicas
-#        :type oncomplete: completion
-#        :param onsafe:  what to do when the write is safe and complete on storage
-#            on all replicas
-#        :type onsafe: completion
-#
-#        :raises: :class:`Error`
-#        :returns: completion object
-#        """
-#        completion = self.__get_completion(oncomplete, onsafe)
-#        ret = run_in_thread(self.librados.rados_aio_append,
-#                            (self.io, cstr(object_name),
-#                             completion.rados_comp, c_char_p(to_append),
-#                             c_size_t(len(to_append))))
-#        if ret < 0:
-#            raise make_ex(ret, "error appending to object %s" % object_name)
-#        return completion
-#
-#    def aio_flush(self):
-#        """
-#        Block until all pending writes in an io context are safe
-#
-#        :raises: :class:`Error`
-#        """
-#        ret = run_in_thread(self.librados.rados_aio_flush, (self.io,))
-#        if ret < 0:
-#            raise make_ex(ret, "error flushing")
-#
+        if oncomplete:
+            complete_cb = <rados_callback_t>&__aio_complete_cb
+        if onsafe:
+            safe_cb = <rados_callback_t>&__aio_safe_cb
+
+        with nogil:
+            ret = rados_aio_create_completion(p_completion_obj, complete_cb, safe_cb, 
+                                              &completion)
+        if ret < 0:
+            raise make_ex(ret, "error getting a completion")
+
+        completion_obj.rados_comp = completion
+        return completion_obj
+
+    def aio_write(self, object_name, to_write, offset=0,
+                  oncomplete=None, onsafe=None):
+        """
+        Write data to an object asynchronously
+
+        Queues the write and returns.
+
+        :param object_name: name of the object
+        :type object_name: str
+        :param to_write: data to write
+        :type to_write: bytes
+        :param offset: byte offset in the object to begin writing at
+        :type offset: int
+        :param oncomplete: what to do when the write is safe and complete in memory
+            on all replicas
+        :type oncomplete: completion
+        :param onsafe:  what to do when the write is safe and complete on storage
+            on all replicas
+        :type onsafe: completion
+
+        :raises: :class:`Error`
+        :returns: completion object
+        """
+
+        object_name = cstr(object_name, 'object_name')
+
+        cdef:
+            Completion completion
+            char* _object_name = object_name
+            char* _to_write = to_write
+            size_t size = len(to_write)
+            uint64_t _offset = offset
+
+        completion = self.__get_completion(oncomplete, onsafe)
+
+        with nogil:
+            ret = rados_aio_write(self.io, _object_name, completion.rados_comp, 
+                                  _to_write, size, _offset)
+        if ret < 0:
+            raise make_ex(ret, "error writing object %s" % object_name)
+        return completion
+
+    def aio_write_full(self, object_name, to_write,
+                       oncomplete=None, onsafe=None):
+        """
+        Asychronously write an entire object
+
+        The object is filled with the provided data. If the object exists,
+        it is atomically truncated and then written.
+        Queues the write and returns.
+
+        :param object_name: name of the object
+        :type object_name: str
+        :param to_write: data to write
+        :type to_write: str
+        :param oncomplete: what to do when the write is safe and complete in memory
+            on all replicas
+        :type oncomplete: completion
+        :param onsafe:  what to do when the write is safe and complete on storage
+            on all replicas
+        :type onsafe: completion
+
+        :raises: :class:`Error`
+        :returns: completion object
+        """
+
+        object_name = cstr(object_name, 'object_name')
+
+        cdef:
+            Completion completion
+            char* _object_name = object_name
+            char* _to_write = to_write
+            size_t size = len(to_write)
+
+        completion = self.__get_completion(oncomplete, onsafe)
+
+        with nogil:
+            ret = rados_aio_write_full(self.io, _object_name, 
+                                       completion.rados_comp, 
+                                       _to_write, size)
+        if ret < 0:
+            raise make_ex(ret, "error writing object %s" % object_name)
+        return completion
+
+    def aio_append(self, object_name, to_append, oncomplete=None, onsafe=None):
+        """
+        Asychronously append data to an object
+
+        Queues the write and returns.
+
+        :param object_name: name of the object
+        :type object_name: str
+        :param to_append: data to append
+        :type to_append: str
+        :param offset: byte offset in the object to begin writing at
+        :type offset: int
+        :param oncomplete: what to do when the write is safe and complete in memory
+            on all replicas
+        :type oncomplete: completion
+        :param onsafe:  what to do when the write is safe and complete on storage
+            on all replicas
+        :type onsafe: completion
+
+        :raises: :class:`Error`
+        :returns: completion object
+        """
+        object_name = cstr(object_name, 'object_name')
+
+        cdef:
+            Completion completion
+            char* _object_name = object_name
+            char* _to_append = to_append
+            size_t size = len(to_append)
+
+        completion = self.__get_completion(oncomplete, onsafe)
+
+        with nogil:
+            ret = rados_aio_append(self.io, _object_name, 
+                                   completion.rados_comp, 
+                                   _to_append, size)
+        if ret < 0:
+            raise make_ex(ret, "error appending object %s" % object_name)
+        return completion
+
+    def aio_flush(self):
+        """
+        Block until all pending writes in an io context are safe
+
+        :raises: :class:`Error`
+        """
+        with nogil:
+            ret = rados_aio_flush(self.io)
+        if ret < 0:
+            raise make_ex(ret, "error flushing")
+
 #    def aio_read(self, object_name, length, offset, oncomplete):
 #        """
 #        Asychronously read data from an object
@@ -1760,30 +1834,36 @@ cdef class Ioctx(object):
 #        if ret < 0:
 #            raise make_ex(ret, "error reading %s" % object_name)
 #        return completion
-#
-#    def aio_remove(self, object_name, oncomplete=None, onsafe=None):
-#        """
-#        Asychronously remove an object
-#
-#        :param object_name: name of the object to remove
-#        :type object_name: str
-#        :param oncomplete: what to do when the remove is safe and complete in memory
-#            on all replicas
-#        :type oncomplete: completion
-#        :param onsafe:  what to do when the remove is safe and complete on storage
-#            on all replicas
-#        :type onsafe: completion
-#
-#        :raises: :class:`Error`
-#        :returns: completion object
-#        """
-#        completion = self.__get_completion(oncomplete, onsafe)
-#        ret = run_in_thread(self.librados.rados_aio_remove,
-#                            (self.io, cstr(object_name),
-#                             completion.rados_comp))
-#        if ret < 0:
-#            raise make_ex(ret, "error removing %s" % object_name)
-#        return completion
+
+    def aio_remove(self, object_name, oncomplete=None, onsafe=None):
+        """
+        Asychronously remove an object
+
+        :param object_name: name of the object to remove
+        :type object_name: str
+        :param oncomplete: what to do when the remove is safe and complete in memory
+            on all replicas
+        :type oncomplete: completion
+        :param onsafe:  what to do when the remove is safe and complete on storage
+            on all replicas
+        :type onsafe: completion
+
+        :raises: :class:`Error`
+        :returns: completion object
+        """
+        object_name = cstr(object_name, 'object_name')
+
+        cdef:
+            Completion completion
+            char* _object_name = object_name
+
+        completion = self.__get_completion(oncomplete, onsafe)
+        with nogil:
+            ret = rados_aio_remove(self.io, _object_name,
+                                   completion.rados_comp)
+        if ret < 0:
+            raise make_ex(ret, "error removing %s" % object_name)
+        return completion
 
     def require_ioctx_open(self):
         """
@@ -2057,38 +2137,64 @@ returned %d, but should return zero on success." % (self.name, ret))
             # itself and set ret_s to NULL, hence XDECREF).
             ref.Py_XDECREF(ret_s)
 
-#    @requires(('key', str_type), ('cls', str_type), ('method', str_type), ('data', bytes))
-#    def execute(self, key, cls, method, data, length=8192):
-#        """
-#        Execute an OSD class method on an object.
-#
-#        :param key: name of the object
-#        :type key: str
-#        :param cls: name of the object class
-#        :type cls: str
-#        :param method: name of the method
-#        :type method: str
-#        :param data: input data
-#        :type data: bytes
-#        :param length: size of output buffer in bytes (default=8291)
-#        :type length: int
-#
-#        :raises: :class:`TypeError`
-#        :raises: :class:`Error`
-#        :returns: (ret, method output)
-#        """
-#        self.require_ioctx_open()
-#        ret_buf = create_string_buffer(length)
-#        ret = run_in_thread(self.librados.rados_exec,
-#                (self.io, cstr(key), cstr(cls), cstr(method),
-#                    c_char_p(data), c_size_t(len(data)), ret_buf,
-#                    c_size_t(length)))
-#        if ret < 0:
-#            raise make_ex(ret, "Ioctx.exec(%s): failed to exec %s:%s on %s" %
-#                    (self.name, cls, method, key))
-#        return ret, ctypes.string_at(ret_buf, min(ret, length))
-#
+    @requires(('key', str_type), ('cls', str_type), ('method', str_type), ('data', bytes))
+    def execute(self, key, cls, method, data, length=8192):
+        """
+        Execute an OSD class method on an object.
+
+        :param key: name of the object
+        :type key: str
+        :param cls: name of the object class
+        :type cls: str
+        :param method: name of the method
+        :type method: str
+        :param data: input data
+        :type data: bytes
+        :param length: size of output buffer in bytes (default=8291)
+        :type length: int
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        :returns: (ret, method output)
+        """
+        self.require_ioctx_open()
+
+        key = cstr(key, 'key')
+        cls = cstr(cls, 'cls')
+        method = cstr(method, 'method')
+        cdef:
+            char *_key = key
+            char *_cls = cls
+            char *_method = method
+            char *_data = data
+            size_t _data_len = len(data)
+
+            char *ref_buf
+            size_t _length = length
+            PyObject* ret_s = NULL
+
+        ret_s = PyBytes_FromStringAndSize(NULL, length)
+        try:
+            ret_buf = PyBytes_AsString(ret_s)
+            with nogil:
+                ret = rados_exec(self.io, _key, _cls, _method, _data,
+                                 _data_len, ret_buf, _length)
+            if ret < 0:
+                raise make_ex(ret, "Ioctx.read(%s): failed to read %s" % (self.name, key))
+
+            if ret != length:
+                _PyBytes_Resize(&ret_s, ret)
+
+            return ret, <object>ret_s
+        finally:
+            # We DECREF unconditionally: the cast to object above will have
+            # INCREFed if necessary. This also takes care of exceptions,
+            # including if _PyString_Resize fails (that will free the string
+            # itself and set ret_s to NULL, hence XDECREF).
+            ref.Py_XDECREF(ret_s)
+
 #    def get_stats(self):
+#        # FIXME(sileht): test_rados.py doesn't have test for this
 #        """
 #        Get pool usage statistics
 #
@@ -2137,7 +2243,7 @@ returned %d, but should return zero on success." % (self.name, ret))
 #                "num_rd_kb": stats.num_rd_kb,
 #                "num_wr": stats.num_wr,
 #                "num_wr_kb": stats.num_wr_kb}
-#
+
     @requires(('key', str_type))
     def remove_object(self, key):
         """
@@ -2456,38 +2562,48 @@ returned %d, but should return zero on success." % (self.name, ret))
             ret = rados_get_last_version(self.io)
         return int(ret)
 
-#    def create_write_op(self):
-#        """
-#        create write operation object.
-#        need call release_write_op after use
-#        """
-#        self.librados.rados_create_write_op.restype = c_void_p
-#        return run_in_thread(self.librados.rados_create_write_op, (None,))
-#
-#    def create_read_op(self):
-#        """
-#        create read operation object.
-#        need call release_read_op after use
-#        """
-#        self.librados.rados_create_read_op.restype = c_void_p
-#        return run_in_thread(self.librados.rados_create_read_op, (None,))
-#
-#    def release_write_op(self, write_op):
-#        """
-#        release memory alloc by create_write_op
-#        """
-#        self.librados.rados_release_write_op.argtypes = [c_void_p]
-#        run_in_thread(self.librados.rados_release_write_op, (c_void_p(write_op),))
-#
-#    def release_read_op(self, read_op):
-#        """
-#        release memory alloc by create_read_op
-#        :para read_op: read_op object
-#        :type: int
-#        """
-#        self.librados.rados_release_read_op.argtypes = [c_void_p]
-#        run_in_thread(self.librados.rados_release_read_op, (c_void_p(read_op),))
-#
+    def create_write_op(self):
+        """
+        create write operation object.
+        need call release_write_op after use
+        """
+        cdef rados_write_op_t ret
+        with nogil:
+            ret = rados_create_write_op()
+        # NOTE(sileht): using pointer outside of the python list is not 
+        # very nice, but keep compat with older lib.
+        return int(<uintptr_t>ret)
+
+    def create_read_op(self):
+        """
+        create read operation object.
+        need call release_read_op after use
+        """
+        cdef rados_read_op_t ret
+        with nogil:
+            ret = rados_create_read_op()
+        # NOTE(sileht): using pointer outside of the python lib is not 
+        # very nice, but keep compat with older lib.
+        return int(<uintptr_t>ret)
+
+    def release_write_op(self, write_op):
+        """
+        release memory alloc by create_write_op
+        """
+        cdef rados_read_op_t _write_op = <rados_read_op_t>write_op
+        with nogil:
+            rados_release_write_op(_write_op)
+
+    def release_read_op(self, read_op):
+        """
+        release memory alloc by create_read_op
+        :para read_op: read_op object
+        :type: int
+        """
+        cdef rados_read_op_t _read_op = <rados_read_op_t>read_op
+        with nogil:
+            rados_release_read_op(_read_op)
+
 #    @requires(('write_op', int), ('keys', tuple), ('values', tuple))
 #    def set_omap(self, write_op, keys, values):
 #        """
