@@ -50,10 +50,16 @@ cdef extern from "Python.h":
     int _PyBytes_Resize(PyObject **string, Py_ssize_t newsize) except -1
 
 
-
-
 cdef extern from "time.h":
-    ctypedef int time_t
+    ctypedef long int time_t
+    ctypedef long int suseconds_t
+
+
+cdef extern from "sys/time.h":
+    cdef struct timeval:
+        time_t tv_sec
+        suseconds_t tv_usec
+
 
 cdef extern from "rados/librados.h" nogil:
     enum:
@@ -175,6 +181,15 @@ cdef extern from "rados/librados.h" nogil:
     void rados_ioctx_snap_set_read(rados_ioctx_t io, rados_snap_t snap)
     int rados_ioctx_snap_list(rados_ioctx_t io, rados_snap_t * snaps, int maxlen)
     int rados_ioctx_snap_get_stamp(rados_ioctx_t io, rados_snap_t id, time_t * t)
+
+
+    int rados_lock_exclusive(rados_ioctx_t io, const char * oid, const char * name, 
+                             const char * cookie, const char * desc, 
+                             timeval * duration, uint8_t flags)
+    int rados_lock_shared(rados_ioctx_t io, const char * o, const char * name, 
+                          const char * cookie, const char * tag, const char * desc,
+                          timeval * duration, uint8_t flags)
+    int rados_unlock(rados_ioctx_t io, const char * o, const char * name, const char * cookie)
 
 
 
@@ -2623,96 +2638,142 @@ returned %d, but should return zero on success." % (self.name, ret))
 #        run_in_thread(self.librados.rados_write_op_omap_clear,
 #                      (c_void_p(write_op),))
 #
-#    @requires(('key', str_type), ('name', str_type), ('cookie', str_type), ('desc', str_type),
-#              ('duration', opt(int)), ('flags', int))
-#    def lock_exclusive(self, key, name, cookie, desc="", duration=None, flags=0):
-#
-#        """
-#        Take an exclusive lock on an object
-#
-#        :param key: name of the object
-#        :type key: str
-#        :param name: name of the lock
-#        :type name: str
-#        :param cookie: cookie of the lock
-#        :type cookie: str
-#        :param desc: description of the lock
-#        :type desc: str
-#        :param duration: duration of the lock in seconds
-#        :type duration: int
-#        :param flags: flags
-#        :type flags: int
-#
-#        :raises: :class:`TypeError`
-#        :raises: :class:`Error`
-#        """
-#        self.require_ioctx_open()
-#
-#        ret = run_in_thread(self.librados.rados_lock_exclusive,
-#                            (self.io, cstr(key), cstr(name), cstr(cookie),
-#                             cstr(desc),
-#                             timeval(duration, None) if duration is None else None,
-#                             c_uint8(flags)))
-#        if ret < 0:
-#            raise make_ex(ret, "Ioctx.rados_lock_exclusive(%s): failed to set lock %s on %s" % (self.name, name, key))
-#
-#    @requires(('key', str_type), ('name', str_type), ('cookie', str_type), ('tag', str_type),
-#              ('desc', str_type), ('duration', opt(int)), ('flags', int))
-#    def lock_shared(self, key, name, cookie, tag, desc="", duration=None, flags=0):
-#
-#        """
-#        Take a shared lock on an object
-#
-#        :param key: name of the object
-#        :type key: str
-#        :param name: name of the lock
-#        :type name: str
-#        :param cookie: cookie of the lock
-#        :type cookie: str
-#        :param tag: tag of the lock
-#        :type tag: str
-#        :param desc: description of the lock
-#        :type desc: str
-#        :param duration: duration of the lock in seconds
-#        :type duration: int
-#        :param flags: flags
-#        :type flags: int
-#
-#        :raises: :class:`TypeError`
-#        :raises: :class:`Error`
-#        """
-#        self.require_ioctx_open()
-#
-#        ret = run_in_thread(self.librados.rados_lock_shared,
-#                            (self.io, cstr(key), cstr(name), cstr(cookie),
-#                             cstr(tag), cstr(desc),
-#                             timeval(duration, None) if duration is None else None,
-#                             c_uint8(flags)))
-#        if ret < 0:
-#            raise make_ex(ret, "Ioctx.rados_lock_exclusive(%s): failed to set lock %s on %s" % (self.name, name, key))
-#
-#    @requires(('key', str_type), ('name', str_type), ('cookie', str_type))
-#    def unlock(self, key, name, cookie):
-#
-#        """
-#        Release a shared or exclusive lock on an object
-#
-#        :param key: name of the object
-#        :type key: str
-#        :param name: name of the lock
-#        :type name: str
-#        :param cookie: cookie of the lock
-#        :type cookie: str
-#
-#        :raises: :class:`TypeError`
-#        :raises: :class:`Error`
-#        """
-#        self.require_ioctx_open()
-#
-#        ret = run_in_thread(self.librados.rados_unlock,
-#                            (self.io, cstr(key), cstr(name), cstr(cookie)))
-#        if ret < 0:
-#            raise make_ex(ret, "Ioctx.rados_lock_exclusive(%s): failed to set lock %s on %s" % (self.name, name, key))
+    @requires(('key', str_type), ('name', str_type), ('cookie', str_type), ('desc', str_type),
+              ('duration', opt(int)), ('flags', int))
+    def lock_exclusive(self, key, name, cookie, desc="", duration=None, flags=0):
+
+        """
+        Take an exclusive lock on an object
+
+        :param key: name of the object
+        :type key: str
+        :param name: name of the lock
+        :type name: str
+        :param cookie: cookie of the lock
+        :type cookie: str
+        :param desc: description of the lock
+        :type desc: str
+        :param duration: duration of the lock in seconds
+        :type duration: int
+        :param flags: flags
+        :type flags: int
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        """
+        self.require_ioctx_open()
+
+        key = cstr(key, 'key')
+        name = cstr(name, 'name')
+        cookie = cstr(cookie, 'cookie')
+        desc = cstr(desc, 'desc')
+
+        cdef:
+            char* _key = key
+            char* _name = name
+            char* _cookie = cookie
+            char* _desc = desc
+            uint8_t _flags = flags
+            timeval _duration
+
+        if duration is None:
+            with nogil:
+                ret = rados_lock_exclusive(self.io, _key, _name, _cookie, _desc,
+                                           NULL, _flags)
+        else:
+            _duration.tv_sec = duration
+            with nogil:
+                ret = rados_lock_exclusive(self.io, _key, _name, _cookie, _desc,
+                                           &_duration, _flags)
+
+        if ret < 0:
+            raise make_ex(ret, "Ioctx.rados_lock_exclusive(%s): failed to set lock %s on %s" % (self.name, name, key))
+
+    @requires(('key', str_type), ('name', str_type), ('cookie', str_type), ('tag', str_type),
+              ('desc', str_type), ('duration', opt(int)), ('flags', int))
+    def lock_shared(self, key, name, cookie, tag, desc="", duration=None, flags=0):
+
+        """
+        Take a shared lock on an object
+
+        :param key: name of the object
+        :type key: str
+        :param name: name of the lock
+        :type name: str
+        :param cookie: cookie of the lock
+        :type cookie: str
+        :param tag: tag of the lock
+        :type tag: str
+        :param desc: description of the lock
+        :type desc: str
+        :param duration: duration of the lock in seconds
+        :type duration: int
+        :param flags: flags
+        :type flags: int
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        """
+        self.require_ioctx_open()
+
+        key = cstr(key, 'key')
+        tag = cstr(tag, 'tag')
+        name = cstr(name, 'name')
+        cookie = cstr(cookie, 'cookie')
+        desc = cstr(desc, 'desc')
+
+        cdef:
+            char* _key = key
+            char* _tag = tag
+            char* _name = name
+            char* _cookie = cookie
+            char* _desc = desc
+            uint8_t _flags = flags
+            timeval _duration
+
+        if duration is None:
+            with nogil:
+                ret = rados_lock_shared(self.io, _key, _name, _cookie, _tag, _desc,
+                                        NULL, _flags)
+        else:
+            _duration.tv_sec = duration
+            with nogil:
+                ret = rados_lock_shared(self.io, _key, _name, _cookie, _tag, _desc,
+                                        &_duration, _flags)
+        if ret < 0:
+            raise make_ex(ret, "Ioctx.rados_lock_exclusive(%s): failed to set lock %s on %s" % (self.name, name, key))
+
+    @requires(('key', str_type), ('name', str_type), ('cookie', str_type))
+    def unlock(self, key, name, cookie):
+
+        """
+        Release a shared or exclusive lock on an object
+
+        :param key: name of the object
+        :type key: str
+        :param name: name of the lock
+        :type name: str
+        :param cookie: cookie of the lock
+        :type cookie: str
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        """
+        self.require_ioctx_open()
+
+        key = cstr(key, 'key')
+        name = cstr(name, 'name')
+        cookie = cstr(cookie, 'cookie')
+
+        cdef:
+            char* _key = key
+            char* _name = name
+            char* _cookie = cookie
+
+        with nogil:
+            ret = rados_unlock(self.io, _key, _name, _cookie)
+        if ret < 0:
+            raise make_ex(ret, "Ioctx.rados_lock_exclusive(%s): failed to set lock %s on %s" % (self.name, name, key))
 
 
 def set_object_locator(func):
