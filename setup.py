@@ -41,8 +41,8 @@ setup(
         "rados library."),
     ext_modules = cythonize([
         Extension("cradox",
-            ["rados.pyx"],
-            libraries=["cradox"]
+            ["cradox.pyx"],
+            libraries=["rados"]
             )
     ], build_dir=os.environ.get("CYTHON_BUILD_DIR", None)),
     cmdclass={

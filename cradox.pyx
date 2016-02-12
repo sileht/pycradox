@@ -11,7 +11,7 @@ method.
 # Copyright 2011 Josh Durgin
 # Copyright 2011, Hannu Valtonen <hannu.valtonen@ormod.com>
 # Copyright 2015 Hector Martin <marcan@marcan.st>
-# Copyright 2016 Mehdi Abaajiyj <sileht@redhat.com>
+# Copyright 2016 Mehdi Abaakouk <sileht@redhat.com>
 
 from cpython cimport PyObject, ref, exc
 from cpython.string cimport PyString_AsString
