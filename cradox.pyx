@@ -2042,10 +2042,6 @@ returned %d, but should return zero on success." % (self.name, ret))
             # itself and set ret_s to NULL, hence XDECREF).
             ref.Py_XDECREF(ret_s)
 
-        ret = run_in_thread(self.librados.rados_read,
-                            (self.io, cstr(key), ret_buf, c_size_t(length),
-                             c_uint64(offset)))
-
 #    @requires(('key', str_type), ('cls', str_type), ('method', str_type), ('data', bytes))
 #    def execute(self, key, cls, method, data, length=8192):
 #        """
