@@ -13,13 +13,14 @@ method.
 # Copyright 2015 Hector Martin <marcan@marcan.st>
 # Copyright 2016 Mehdi Abaakouk <sileht@redhat.com>
 
-from cpython cimport PyObject, ref, exc
+from cpython cimport PyObject, ref, exc, array
 from cpython.string cimport PyString_AsString
 from cpython.dict cimport PyDict_New
 from libc cimport errno
 from libc.stdint cimport *
 from libc.stdlib cimport malloc, realloc, free
 
+import array
 import sys
 import threading
 import time
@@ -76,6 +77,7 @@ cdef extern from "rados/librados.h" nogil:
     ctypedef void* rados_config_t
     ctypedef void* rados_ioctx_t
     ctypedef void* rados_xattrs_iter_t
+    ctypedef void* rados_omap_iter_t
     ctypedef void* rados_list_ctx_t
     ctypedef uint64_t rados_snap_t
 
@@ -219,6 +221,17 @@ cdef extern from "rados/librados.h" nogil:
 
     int rados_exec(rados_ioctx_t io, const char * oid, const char * cls, const char * method,
                    const char * in_buf, size_t in_len, char * buf, size_t out_len)
+
+    int rados_write_op_operate(rados_write_op_t write_op, rados_ioctx_t io, const char * oid, time_t * mtime, int flags)
+    void rados_write_op_omap_set(rados_write_op_t write_op, const char * const* keys, const char * const* vals, const size_t * lens, size_t num)
+    void rados_write_op_omap_rm_keys(rados_write_op_t write_op, const char * const* keys, size_t keys_len)
+    void rados_write_op_omap_clear(rados_write_op_t write_op)
+    void rados_read_op_omap_get_vals(rados_read_op_t read_op, const char * start_after, const char * filter_prefix, uint64_t max_return, rados_omap_iter_t * iter, int * prval)
+    void rados_read_op_omap_get_keys(rados_read_op_t read_op, const char * start_after, uint64_t max_return, rados_omap_iter_t * iter, int * prval)
+    void rados_read_op_omap_get_vals_by_keys(rados_read_op_t read_op, const char * const* keys, size_t keys_len, rados_omap_iter_t * iter, int * prval)
+    int rados_read_op_operate(rados_read_op_t read_op, rados_ioctx_t io, const char * oid, int flags)
+    int rados_omap_get_next(rados_omap_iter_t iter, const char * const* key, const char * const* val, size_t * len)
+    void rados_omap_get_end(rados_omap_iter_t iter)
 
 
 LIBRADOS_OP_FLAG_EXCL = _LIBRADOS_OP_FLAG_EXCL
@@ -436,6 +449,7 @@ cdef char* opt_str(s) except? NULL:
         return NULL
     return s
 
+
 cdef void* realloc_chk(void* ptr, size_t size) except NULL:
     cdef void *ret = realloc(ptr, size)
     if ret == NULL:
@@ -443,10 +457,30 @@ cdef void* realloc_chk(void* ptr, size_t size) except NULL:
     return ret
 
 
-cdef char ** to_cstring_array(list_str):
+cdef size_t * to_csize_t_array(list_int):
+    cdef size_t *ret = <size_t *>malloc(len(list_int) * sizeof(size_t))
+    if ret == NULL:
+        raise MemoryError("malloc failed")
+    for i in xrange(len(list_int)):
+        ret[i] = <size_t>list_int[i]
+    return ret
+
+
+cdef char ** to_cstring_array(list_str, name):
     cdef char **ret = <char **>malloc(len(list_str) * sizeof(char *))
+    if ret == NULL:
+        raise MemoryError("malloc failed")
     for i in xrange(len(list_str)):
-        ret[i] = PyString_AsString(list_str[i])
+        ret[i] = PyString_AsString(list_str[i])  # cstr(list_str[i], name))
+    return ret
+
+
+cdef char ** to_bytes_array(list_bytes):
+    cdef char **ret = <char **>malloc(len(list_bytes) * sizeof(char *))
+    if ret == NULL:
+        raise MemoryError("malloc failed")
+    for i in xrange(len(list_bytes)):
+        ret[i] = <char *>list_bytes[i]
     return ret
 
 
@@ -591,7 +625,7 @@ Rados object in state %s." % self.state)
         
         cdef:
             int _argc = len(args)
-            const char **_argv = <const char **>to_cstring_array(args)
+            const char **_argv = <const char **>to_cstring_array(args, 'args')
             const char **_remargv = NULL
 
         try:
@@ -608,6 +642,7 @@ Rados object in state %s." % self.state)
             # self.parsed_args = args
             return retargs
         finally:
+            free(_argv)
             free(_remargv)
 
     def conf_parse_env(self, var='CEPH_ARGS'):
@@ -1038,7 +1073,7 @@ Rados object in state %s." % self.state)
 
         cdef:
             char *_target = opt_str(target)
-            const char **_cmd = <const char **>to_cstring_array(cmd)
+            const char **_cmd = <const char **>to_cstring_array(cmd, 'cmd')
             size_t _cmdlen = len(cmd)
 
             const char *_inbuf = inbuf
@@ -1049,29 +1084,31 @@ Rados object in state %s." % self.state)
             char *_outs
             size_t _outs_len
 
-        if target:
-            with nogil:
-                ret = rados_mon_command_target(self.cluster, _target, 
-                                               _cmd, _cmdlen, 
-                                               _inbuf, _inbuf_len,
-                                               &_outbuf, &_outbuf_len,
-                                               &_outs, &_outs_len)
-        else:
-            with nogil:
-                ret = rados_mon_command(self.cluster,
-                                        _cmd, _cmdlen,
-                                        _inbuf, _inbuf_len,
-                                        &_outbuf, &_outbuf_len,
-                                        &_outs, &_outs_len)
+        try:
+            if target:
+                with nogil:
+                    ret = rados_mon_command_target(self.cluster, _target, 
+                                                _cmd, _cmdlen, 
+                                                _inbuf, _inbuf_len,
+                                                &_outbuf, &_outbuf_len,
+                                                &_outs, &_outs_len)
+            else:
+                with nogil:
+                    ret = rados_mon_command(self.cluster,
+                                            _cmd, _cmdlen,
+                                            _inbuf, _inbuf_len,
+                                            &_outbuf, &_outbuf_len,
+                                            &_outs, &_outs_len)
 
-        my_outs = decode_cstr(_outs[:_outs_len])
-        my_outbuf = decode_cstr(_outbuf[:_outbuf_len])
-        if _outs_len:
-            rados_buffer_free(_outs)
-        if _outbuf_len:
-            rados_buffer_free(_outbuf)
-
-        return (ret, my_outbuf, my_outs)
+            my_outs = decode_cstr(_outs[:_outs_len])
+            my_outbuf = decode_cstr(_outbuf[:_outbuf_len])
+            if _outs_len:
+                rados_buffer_free(_outs)
+            if _outbuf_len:
+                rados_buffer_free(_outbuf)
+            return (ret, my_outbuf, my_outs)
+        finally:
+            free(_cmd)
 
     def osd_command(self, osdid, cmd, inbuf, timeout=0):
         """
@@ -1087,7 +1124,7 @@ Rados object in state %s." % self.state)
 
         cdef:
             int _osdid = osdid
-            const char **_cmd = <const char **>to_cstring_array(cmd)
+            const char **_cmd = <const char **>to_cstring_array(cmd, 'cmd')
             size_t _cmdlen = len(cmd)
 
             const char *_inbuf = inbuf
@@ -1098,20 +1135,22 @@ Rados object in state %s." % self.state)
             char *_outs
             size_t _outs_len
 
+        try:
+            with nogil:
+                ret = rados_osd_command(self.cluster, _osdid, _cmd, _cmdlen,
+                                        _inbuf, _inbuf_len,
+                                        &_outbuf, &_outbuf_len, 
+                                        &_outs, &_outs_len)
 
-        with nogil:
-            ret = rados_osd_command(self.cluster, _osdid, _cmd, _cmdlen,
-                                    _inbuf, _inbuf_len,
-                                    &_outbuf, &_outbuf_len, 
-                                    &_outs, &_outs_len)
-
-        my_outs = decode_cstr(_outs[:_outs_len])
-        my_outbuf = decode_cstr(_outbuf[:_outbuf_len])
-        if _outs_len:
-            rados_buffer_free(_outs)
-        if _outbuf_len:
-            rados_buffer_free(_outbuf)
-        return (ret, my_outbuf, my_outs)
+            my_outs = decode_cstr(_outs[:_outs_len])
+            my_outbuf = decode_cstr(_outbuf[:_outbuf_len])
+            if _outs_len:
+                rados_buffer_free(_outs)
+            if _outbuf_len:
+                rados_buffer_free(_outbuf)
+            return (ret, my_outbuf, my_outs)
+        finally:
+            free(_cmd)
 
     def pg_command(self, pgid, cmd, inbuf, timeout=0):
         """
@@ -1128,7 +1167,7 @@ Rados object in state %s." % self.state)
 
         cdef:
             char *_pgid = pgid
-            const char **_cmd = <const char **>to_cstring_array(cmd)
+            const char **_cmd = <const char **>to_cstring_array(cmd, 'cmd')
             size_t _cmdlen = len(cmd)
 
             const char *_inbuf = inbuf
@@ -1139,20 +1178,22 @@ Rados object in state %s." % self.state)
             char *_outs
             size_t _outs_len
 
+        try:
+            with nogil:
+                ret = rados_pg_command(self.cluster, _pgid, _cmd, _cmdlen,
+                                    _inbuf, _inbuf_len,
+                                    &_outbuf, &_outbuf_len, 
+                                    &_outs, &_outs_len)
 
-        with nogil:
-            ret = rados_pg_command(self.cluster, _pgid, _cmd, _cmdlen,
-                                   _inbuf, _inbuf_len,
-                                   &_outbuf, &_outbuf_len, 
-                                   &_outs, &_outs_len)
-
-        my_outs = decode_cstr(_outs[:_outs_len])
-        my_outbuf = decode_cstr(_outbuf[:_outbuf_len])
-        if _outs_len:
-            rados_buffer_free(_outs)
-        if _outbuf_len:
-            rados_buffer_free(_outbuf)
-        return (ret, my_outbuf, my_outs)
+            my_outs = decode_cstr(_outs[:_outs_len])
+            my_outbuf = decode_cstr(_outbuf[:_outbuf_len])
+            if _outs_len:
+                rados_buffer_free(_outs)
+            if _outbuf_len:
+                rados_buffer_free(_outbuf)
+            return (ret, my_outbuf, my_outs)
+        finally:
+            free(_cmd)
 
     def wait_for_latest_osdmap(self):
         self.require_state("connected")
@@ -1184,10 +1225,10 @@ cdef class OmapIterator(object):
     """Omap iterator"""
 
     cdef public Ioctx ioctx
+    cdef rados_omap_iter_t ctx
 
-    def __init__(self, ioctx, ctx):
+    def __init__(self, Ioctx ioctx):
         self.ioctx = ioctx
-        self.ctx = ctx
 
     def __iter__(self):
         return self
@@ -1195,28 +1236,32 @@ cdef class OmapIterator(object):
     def next(self):
         return self.__next__()
 
-#    def __next__(self):
-#        """
-#        Get the next key-value pair in the object
-#        :returns: next rados.OmapItem
-#        """
-#        key_ = c_char_p(0)
-#        val_ = c_char_p(0)
-#        len_ = c_int(0)
-#        ret = run_in_thread(self.ioctx.librados.rados_omap_get_next,
-#                      (self.ctx, byref(key_), byref(val_), byref(len_)))
-#        if (ret != 0):
-#            raise make_ex(ret, "error iterating over the omap")
-#        if key_.value is None:
-#            raise StopIteration()
-#        key = decode_cstr(key_)
-#        val = None
-#        if val_.value is not None:
-#            val = ctypes.string_at(val_, len_)
-#        return (key, val)
-#
-#    def __del__(self):
-#        run_in_thread(self.ioctx.librados.rados_omap_get_end, (self.ctx,))
+    def __next__(self):
+        """
+        Get the next key-value pair in the object
+        :returns: next rados.OmapItem
+        """
+        cdef:
+            char *key_ = NULL
+            char *val_ = NULL
+            size_t len_ = 0
+
+        with nogil:
+            ret = rados_omap_get_next(self.ctx, &key_, &val_, &len_)
+
+        if (ret != 0):
+            raise make_ex(ret, "error iterating over the omap")
+        if key_ == NULL:
+            raise StopIteration()
+        key = decode_cstr(key_)
+        val = None
+        if val_ != NULL:
+            val = val_[:len_]
+        return (key, val)
+
+    def __del__(self):
+        with nogil:
+            rados_omap_get_end(self.ctx)
 
 
 cdef class ObjectIterator(object):
@@ -1379,13 +1424,13 @@ ioctx '%s'" % self.ioctx.name)
                 with nogil:
                     ret = rados_ioctx_snap_get_name(self.ioctx.io, snap_id, name, name_len)
                 if (ret == 0):
-                    name_len = ret
                     break
                 elif (ret != -errno.ERANGE):
                     raise make_ex(ret, "rados_snap_get_name error")
-                name_len = name_len * 2
+                else:
+                    name_len = name_len * 2
 
-            snap = Snap(self.ioctx, name, snap_id)
+            snap = Snap(self.ioctx, decode_cstr(name[:name_len]), snap_id)
             self.cur_snap = self.cur_snap + 1
             return snap
         finally:
@@ -1443,10 +1488,6 @@ cdef class Completion(object):
         self.oncomplete = oncomplete
         self.onsafe = onsafe
         self.ioctx = ioctx
-
-        # FIXME(sileht): removed this is c reference not 
-        #self.complete_cb = complete_cb
-        #self.safe_cb = safe_cb
 
     def is_safe(self):
         """
@@ -1532,38 +1573,47 @@ cdef class Completion(object):
         with nogil:
             rados_aio_release(self.rados_comp)
 
-cdef class WriteOpCtx(object):
-    """write operation context manager"""
 
-    cdef rados_write_op_t write_op
-
+cdef class OpCtx(object):
     def __enter__(self):
-        with nogil:
-            self.write_op = rados_create_write_op()
-        # NOTE(sileht): using pointer outside of the python list is not 
-        # very nice, but keep compat with older lib.
-        return int(<uintptr_t>self.write_op)
+        self.create()
+        return self
 
     def __exit__(self, type, msg, traceback):
+        self.release()
+
+
+cdef class WriteOp(object):
+    cdef rados_write_op_t write_op
+
+    def create(self):
+        with nogil:
+            self.write_op = rados_create_write_op()
+        return self
+
+    def release(self):
         with nogil:
             rados_release_write_op(self.write_op)
 
 
-cdef class ReadOpCtx(object):
-    """read operation context manager"""
+class WriteOpCtx(WriteOp, OpCtx):
+    """write operation context manager"""
 
+
+cdef class ReadOp(object):
     cdef rados_read_op_t read_op
 
-    def __enter__(self):
+    def create(self):
         with nogil:
             self.read_op = rados_create_read_op()
-        # NOTE(sileht): using pointer outside of the python list is not 
-        # very nice, but keep compat with older lib.
-        return int(<uintptr_t>self.read_op)
 
-    def __exit__(self, type, msg, traceback):
+    def release(self):
         with nogil:
             rados_release_read_op(self.read_op)
+
+
+class ReadOpCtx(ReadOp, OpCtx):
+    """read operation context manager"""
 
 
 cdef int __aio_safe_cb(rados_completion_t completion, void *args) with gil:
@@ -1574,28 +1624,12 @@ cdef int __aio_safe_cb(rados_completion_t completion, void *args) with gil:
     cb.onsafe(cb)
     return 0
 
-    cdef object io = <object>args
-    cb = None
-    with io.lock:
-        cb = io.safe_cbs[<uintptr_t>completion]
-        del io.safe_cbs[<uintptr_t>completion]
-    cb.onsafe(cb)
-    return 0
-
 
 cdef int __aio_complete_cb(rados_completion_t completion, void *args) with gil:
     """
     Callback to oncomplete() for asynchronous operations
     """
     cdef object cb = <object>args
-    cb.oncomplete(cb)
-    return 0
-
-    cdef object io = <object>args
-    cb = None
-    with io.lock:
-        cb = io.complete_cbs[<uintptr_t>completion]
-        del io.complete_cbs[<uintptr_t>completion]
     cb.oncomplete(cb)
     return 0
 
@@ -1626,6 +1660,7 @@ cdef class Ioctx(object):
 
     def __del__(self):
         self.close()
+
     cdef __get_completion(self, oncomplete, onsafe):
         """
         Constructs a completion to use with asynchronous operations
@@ -2590,32 +2625,20 @@ returned %d, but should return zero on success." % (self.name, ret))
         create write operation object.
         need call release_write_op after use
         """
-        cdef rados_write_op_t ret
-        with nogil:
-            ret = rados_create_write_op()
-        # NOTE(sileht): using pointer outside of the python list is not 
-        # very nice, but keep compat with older lib.
-        return int(<uintptr_t>ret)
+        return WriteOp().create()
 
     def create_read_op(self):
         """
         create read operation object.
         need call release_read_op after use
         """
-        cdef rados_read_op_t ret
-        with nogil:
-            ret = rados_create_read_op()
-        # NOTE(sileht): using pointer outside of the python lib is not 
-        # very nice, but keep compat with older lib.
-        return int(<uintptr_t>ret)
+        return ReadOp().create()
 
     def release_write_op(self, write_op):
         """
         release memory alloc by create_write_op
         """
-        cdef rados_read_op_t _write_op = <rados_read_op_t>write_op
-        with nogil:
-            rados_release_write_op(_write_op)
+        write_op.release()
 
     def release_read_op(self, read_op):
         """
@@ -2623,160 +2646,203 @@ returned %d, but should return zero on success." % (self.name, ret))
         :para read_op: read_op object
         :type: int
         """
-        cdef rados_read_op_t _read_op = <rados_read_op_t>read_op
-        with nogil:
-            rados_release_read_op(_read_op)
+        read_op.release()
 
-#    @requires(('write_op', int), ('keys', tuple), ('values', tuple))
-#    def set_omap(self, write_op, keys, values):
-#        """
-#        set keys values to write_op
-#        :para write_op: write_operation object
-#        :type write_op: int
-#        :para keys: a tuple of keys
-#        :type keys: tuple
-#        :para values: a tuple of values
-#        :type values: tuple
-#        """
-#        if len(keys) != len(values):
-#            raise Error("Rados(): keys and values must have the same number of items")
-#        key_num = len(keys)
-#        key_array_type = c_char_p*key_num
-#        key_array = key_array_type()
-#        key_array[:] = [cstr(key) for key in keys]
-#
-#        value_array_type = c_char_p*key_num
-#        value_array = value_array_type()
-#        value_array[:] = values
-#
-#        lens_array_type = c_size_t*key_num
-#        lens_array = lens_array_type()
-#        for index, value in enumerate(values):
-#            lens_array[index] = c_size_t(len(value))
-#
-#        run_in_thread(self.librados.rados_write_op_omap_set,
-#                      (c_void_p(write_op), byref(key_array), byref(value_array),
-#                       byref(lens_array), c_int(key_num),))
-#
-#    @requires(('write_op', int), ('oid', str_type), ('mtime', opt(int)), ('flags', opt(int)))
-#    def operate_write_op(self, write_op, oid, mtime=0, flags=0):
-#        """
-#        excute the real write operation
-#        :para write_op: write operation object
-#        :type write_op: int
-#        :para oid: object name
-#        :type oid: str
-#        :para mtime: the time to set the mtime to, 0 for the current time
-#        :type mtime: int
-#        :para flags: flags to apply to the entire operation
-#        :type flags: int
-#        """
-#        run_in_thread(self.librados.rados_write_op_operate,
-#                      (c_void_p(write_op), self.io, cstr(oid),
-#                       c_long(mtime), c_int(flags),))
-#
-#    @requires(('read_op', int), ('oid', str_type), ('flag', opt(int)))
-#    def operate_read_op(self, read_op, oid, flag=0):
-#        """
-#        excute the real read operation
-#        :para read_op: read operation object
-#        :type read_op: int
-#        :para oid: object name
-#        :type oid: str
-#        :para flag: flags to apply to the entire operation
-#        :type flag: int
-#        """
-#        run_in_thread(self.librados.rados_read_op_operate,
-#                      (c_void_p(read_op), self.io, cstr(oid), c_int(flag),))
-#
-#    @requires(('read_op', int), ('start_after', str_type), ('filter_prefix', str_type), ('max_return', int))
-#    def get_omap_vals(self, read_op, start_after, filter_prefix, max_return):
-#        """
-#        get the omap values
-#        :para read_op: read operation object
-#        :type read_op: int
-#        :para start_after: list keys starting after start_after
-#        :type start_after: str
-#        :para filter_prefix: list only keys beginning with filter_prefix
-#        :type filter_prefix: str
-#        :para max_return: list no more than max_return key/value pairs
-#        :type max_return: int
-#        :returns: an iterator over the the requested omap values, return value from this action
-#        """
-#        prval = c_int()
-#        iter_addr = c_void_p()
-#        run_in_thread(self.librados.rados_read_op_omap_get_vals,
-#                      (c_void_p(read_op), cstr(start_after),
-#                       cstr(filter_prefix), c_int(max_return),
-#                       byref(iter_addr), pointer(prval)))
-#        return OmapIterator(self, iter_addr), prval.value
-#
-#    @requires(('read_op', int), ('start_after', str_type), ('max_return', int))
-#    def get_omap_keys(self, read_op, start_after, max_return):
-#        """
-#        get the omap keys
-#        :para read_op: read operation object
-#        :type read_op: int
-#        :para start_after: list keys starting after start_after
-#        :type start_after: str
-#        :para max_return: list no more than max_return key/value pairs
-#        :type max_return: int
-#        :returns: an iterator over the the requested omap values, return value from this action
-#        """
-#        prval = c_int()
-#        iter_addr = c_void_p()
-#        run_in_thread(self.librados.rados_read_op_omap_get_keys,
-#                      (c_void_p(read_op), cstr(start_after),
-#                       c_int(max_return), byref(iter_addr), pointer(prval)))
-#        return OmapIterator(self, iter_addr), prval.value
-#
-#    @requires(('read_op', int), ('keys', tuple))
-#    def get_omap_vals_by_keys(self, read_op, keys):
-#        """
-#        get the omap values by keys
-#        :para read_op: read operation object
-#        :type read_op: int
-#        :para keys: input key tuple
-#        :type keys: tuple
-#        :returns: an iterator over the the requested omap values, return value from this action
-#        """
-#        prval = c_int()
-#        iter_addr = c_void_p()
-#        key_num = len(keys)
-#        key_array_type = c_char_p*key_num
-#        key_array = key_array_type()
-#        key_array[:] = [cstr(key) for key in keys]
-#        run_in_thread(self.librados.rados_read_op_omap_get_vals_by_keys,
-#                      (c_void_p(read_op), byref(key_array), c_int(key_num),
-#                       byref(iter_addr), pointer(prval)))
-#        return OmapIterator(self, iter_addr), prval.value
-#
-#    @requires(('write_op', int), ('keys', tuple))
-#    def remove_omap_keys(self, write_op, keys):
-#        """
-#        remove omap keys specifiled
-#        :para write_op: write operation object
-#        :type write_op: int
-#        :para keys: input key tuple
-#        :type keys: tuple
-#        """
-#        key_num = len(keys)
-#        key_array_type = c_char_p*key_num
-#        key_array = key_array_type()
-#        key_array[:] = [cstr(key) for key in keys]
-#        run_in_thread(self.librados.rados_write_op_omap_rm_keys,
-#                      (c_void_p(write_op), byref(key_array), c_int(key_num)))
-#
-#    @requires(('write_op', int))
-#    def clear_omap(self, write_op):
-#        """
-#        Remove all key/value pairs from an object
-#        :para write_op: write operation object
-#        :type write_op: int
-#        """
-#        run_in_thread(self.librados.rados_write_op_omap_clear,
-#                      (c_void_p(write_op),))
-#
+    @requires(('write_op', WriteOp), ('keys', tuple), ('values', tuple))
+    def set_omap(self, write_op, keys, values):
+        """
+        set keys values to write_op
+        :para write_op: write_operation object
+        :type write_op: WriteOp
+        :para keys: a tuple of keys
+        :type keys: tuple
+        :para values: a tuple of values
+        :type values: tuple
+        """
+
+        if len(keys) != len(values):
+            raise Error("Rados(): keys and values must have the same number of items")
+
+        cdef:
+            WriteOp _write_op = write_op
+            size_t key_num = len(keys)
+            const char **_keys = <const char**>to_cstring_array(keys, 'keys')
+            const char **_values = <const char**>to_bytes_array(values)
+            size_t *_lens = to_csize_t_array([len(v) for v in values])
+
+        try:
+            with nogil:
+                rados_write_op_omap_set(_write_op.write_op, _keys , _values, 
+                                        <const size_t *>_lens, key_num)
+        finally:
+            free(_keys)
+            free(_values)
+            free(_lens)
+
+    @requires(('write_op', WriteOp), ('oid', str_type), ('mtime', opt(int)), ('flags', opt(int)))
+    def operate_write_op(self, write_op, oid, mtime=0, flags=0):
+        """
+        excute the real write operation
+        :para write_op: write operation object
+        :type write_op: WriteOp
+        :para oid: object name
+        :type oid: str
+        :para mtime: the time to set the mtime to, 0 for the current time
+        :type mtime: int
+        :para flags: flags to apply to the entire operation
+        :type flags: int
+        """
+
+        oid = cstr(oid, 'oid')
+        cdef:
+            WriteOp _write_op = write_op
+            char *_oid = oid
+            time_t _mtime = mtime
+            int _flags = flags
+
+        with nogil:
+            rados_write_op_operate(_write_op.write_op, self.io, _oid, &_mtime, _flags)
+
+    @requires(('read_op', ReadOp), ('oid', str_type), ('flag', opt(int)))
+    def operate_read_op(self, read_op, oid, flag=0):
+        """
+        excute the real read operation
+        :para read_op: read operation object
+        :type read_op: ReadOp
+        :para oid: object name
+        :type oid: str
+        :para flag: flags to apply to the entire operation
+        :type flag: int
+        """
+        oid = cstr(oid, 'oid')
+        cdef:
+            ReadOp _read_op = read_op
+            char *_oid = oid
+            int _flag = flag
+
+        with nogil:
+            rados_read_op_operate(_read_op.read_op, self.io, _oid, _flag)
+
+    @requires(('read_op', ReadOp), ('start_after', str_type), ('filter_prefix', str_type), ('max_return', int))
+    def get_omap_vals(self, read_op, start_after, filter_prefix, max_return):
+        """
+        get the omap values
+        :para read_op: read operation object
+        :type read_op: ReadOp
+        :para start_after: list keys starting after start_after
+        :type start_after: str
+        :para filter_prefix: list only keys beginning with filter_prefix
+        :type filter_prefix: str
+        :para max_return: list no more than max_return key/value pairs
+        :type max_return: int
+        :returns: an iterator over the the requested omap values, return value from this action
+        """
+
+        start_after = cstr(start_after, 'start_after')
+        filter_prefix = cstr(filter_prefix, 'filter_prefix')
+        cdef:
+            char *_start_after = start_after
+            char *_filter_prefix = filter_prefix
+            ReadOp _read_op = read_op
+            rados_omap_iter_t iter_addr = NULL
+            int _max_return = max_return
+            int prval
+
+        with nogil:
+            rados_read_op_omap_get_vals(_read_op.read_op, _start_after, _filter_prefix,
+                                        _max_return, &iter_addr,  &prval)
+        it = OmapIterator(self)
+        it.ctx = iter_addr
+        return it, int(prval)
+
+    @requires(('read_op', ReadOp), ('start_after', str_type), ('max_return', int))
+    def get_omap_keys(self, read_op, start_after, max_return):
+        """
+        get the omap keys
+        :para read_op: read operation object
+        :type read_op: ReadOp
+        :para start_after: list keys starting after start_after
+        :type start_after: str
+        :para max_return: list no more than max_return key/value pairs
+        :type max_return: int
+        :returns: an iterator over the the requested omap values, return value from this action
+        """
+        start_after = cstr(start_after, 'start_after')
+        cdef:
+            char *_start_after = start_after
+            ReadOp _read_op = read_op
+            rados_omap_iter_t iter_addr = NULL
+            int _max_return = max_return
+            int prval
+
+        with nogil:
+            rados_read_op_omap_get_keys(_read_op.read_op, _start_after,
+                                        _max_return, &iter_addr,  &prval)
+        it = OmapIterator(self)
+        it.ctx = iter_addr
+        return it, int(prval)
+
+    @requires(('read_op', ReadOp), ('keys', tuple))
+    def get_omap_vals_by_keys(self, read_op, keys):
+        """
+        get the omap values by keys
+        :para read_op: read operation object
+        :type read_op: ReadOp
+        :para keys: input key tuple
+        :type keys: tuple
+        :returns: an iterator over the the requested omap values, return value from this action
+        """
+        cdef:
+            ReadOp _read_op = read_op
+            rados_omap_iter_t iter_addr = NULL
+            const char **_keys = <const char**>to_cstring_array(keys, 'keys')
+            size_t key_num = len(keys)
+            int prval
+        try:
+            with nogil:
+                rados_read_op_omap_get_vals_by_keys(_read_op.read_op, _keys, 
+                                                    key_num, &iter_addr,  &prval)
+            it = OmapIterator(self)
+            it.ctx = iter_addr
+            return it, int(prval)
+        finally:
+            free(_keys)
+
+    @requires(('write_op', WriteOp), ('keys', tuple))
+    def remove_omap_keys(self, write_op, keys):
+        """
+        remove omap keys specifiled
+        :para write_op: write operation object
+        :type write_op: WriteOp
+        :para keys: input key tuple
+        :type keys: tuple
+        """
+
+        cdef:
+            WriteOp _write_op = write_op
+            size_t key_num = len(keys)
+            const char **_keys = <const char**>to_cstring_array(keys, 'keys')
+
+        try:
+            with nogil:
+                rados_write_op_omap_rm_keys(_write_op.write_op, _keys, key_num)
+        finally:
+            free(_keys)
+
+    @requires(('write_op', WriteOp))
+    def clear_omap(self, write_op):
+        """
+        Remove all key/value pairs from an object
+        :para write_op: write operation object
+        :type write_op: WriteOp
+        """
+
+        cdef:
+            WriteOp _write_op = write_op
+
+        with nogil:
+            rados_write_op_omap_clear(_write_op.write_op)
+
     @requires(('key', str_type), ('name', str_type), ('cookie', str_type), ('desc', str_type),
               ('duration', opt(int)), ('flags', int))
     def lock_exclusive(self, key, name, cookie, desc="", duration=None, flags=0):

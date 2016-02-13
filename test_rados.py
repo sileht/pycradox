@@ -371,7 +371,7 @@ class TestIoctx(object):
         eq(self.ioctx.read("insnap"), b"contents1")
         self.ioctx.remove_snap("snap1")
         self.ioctx.remove_object("insnap")
-    
+
     def test_snap_read(self):
         self.ioctx.write("insnap", b"contents1")
         self.ioctx.create_snap("snap1")
