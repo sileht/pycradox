@@ -1798,42 +1798,65 @@ cdef class Ioctx(object):
         if ret < 0:
             raise make_ex(ret, "error flushing")
 
-#    def aio_read(self, object_name, length, offset, oncomplete):
-#        """
-#        Asychronously read data from an object
-#
-#        oncomplete will be called with the returned read value as
-#        well as the completion:
-#
-#        oncomplete(completion, data_read)
-#
-#        :param object_name: name of the object to read from
-#        :type object_name: str
-#        :param length: the number of bytes to read
-#        :type length: int
-#        :param offset: byte offset in the object to begin reading from
-#        :type offset: int
-#        :param oncomplete: what to do when the read is complete
-#        :type oncomplete: completion
-#
-#        :raises: :class:`Error`
-#        :returns: completion object
-#        """
-#        buf = create_string_buffer(length)
-#
-#        def oncomplete_(completion_v):
-#            return_value = completion_v.get_return_value()
-#            return oncomplete(completion_v,
-#                              ctypes.string_at(buf, return_value) if return_value >= 0 else None)
-#
-#        completion = self.__get_completion(oncomplete_, None)
-#        ret = run_in_thread(self.librados.rados_aio_read,
-#                            (self.io, cstr(object_name),
-#                             completion.rados_comp, buf, c_size_t(length),
-#                             c_uint64(offset)))
-#        if ret < 0:
-#            raise make_ex(ret, "error reading %s" % object_name)
-#        return completion
+    def aio_read(self, object_name, length, offset, oncomplete):
+        """
+        Asychronously read data from an object
+
+        oncomplete will be called with the returned read value as
+        well as the completion:
+
+        oncomplete(completion, data_read)
+
+        :param object_name: name of the object to read from
+        :type object_name: str
+        :param length: the number of bytes to read
+        :type length: int
+        :param offset: byte offset in the object to begin reading from
+        :type offset: int
+        :param oncomplete: what to do when the read is complete
+        :type oncomplete: completion
+
+        :raises: :class:`Error`
+        :returns: completion object
+        """
+
+        object_name = cstr(object_name, 'object_name')
+
+        cdef:
+            Completion completion
+            char* _object_name = object_name
+            uint64_t _offset = offset
+
+            char *ref_buf
+            size_t _length = length
+            PyObject* ret_s = NULL
+
+        def oncomplete_(completion_v):
+            try:
+                return_value = completion_v.get_return_value()
+                if return_value != length:
+                    _PyBytes_Resize(&ret_s, return_value)
+                return oncomplete(completion_v, <object>ret_s if return_value >= 0 else None)
+            finally:
+                # We DECREF unconditionally: the cast to object above will have
+                # INCREFed if necessary. This also takes care of exceptions,
+                # including if _PyString_Resize fails (that will free the string
+                # itself and set ret_s to NULL, hence XDECREF).
+                ref.Py_XDECREF(ret_s)
+
+        completion = self.__get_completion(oncomplete_, None)
+
+        ret_s = PyBytes_FromStringAndSize(NULL, length)
+        try:
+            ret_buf = PyBytes_AsString(ret_s)
+            with nogil:
+                ret = rados_aio_read(self.io, _object_name, completion.rados_comp,
+                                     ret_buf, _length, _offset)
+            if ret < 0:
+                raise make_ex(ret, "error reading %s" % object_name)
+        except:
+            ref.Py_XDECREF(ret_s)
+        return completion
 
     def aio_remove(self, object_name, oncomplete=None, onsafe=None):
         """
