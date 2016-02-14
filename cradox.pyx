@@ -27,7 +27,7 @@ import time
 
 from collections import Iterable, Iterator
 from datetime import datetime
-from functools import wraps
+from functools import partial, wraps
 from itertools import chain
 
 # Are we running Python 2.x
@@ -80,6 +80,13 @@ cdef extern from "rados/librados.h" nogil:
     ctypedef void* rados_omap_iter_t
     ctypedef void* rados_list_ctx_t
     ctypedef uint64_t rados_snap_t
+    ctypedef void *rados_write_op_t
+    ctypedef void *rados_read_op_t
+    ctypedef void *rados_completion_t
+    ctypedef void (*rados_callback_t)(rados_completion_t cb, void *arg)
+    ctypedef void (*rados_log_callback_t)(void *arg, const char *line, const char *who, 
+                                          uint64_t sec, uint64_t nsec, uint64_t seq, const char *level, const char *msg)
+
 
     cdef struct rados_cluster_stat_t:
         uint64_t kb
@@ -146,6 +153,7 @@ cdef extern from "rados/librados.h" nogil:
                          const char *inbuf, size_t inbuflen,
                          char **outbuf, size_t *outbuflen,
                          char **outs, size_t *outslen)
+    int rados_monitor_log(rados_t cluster, const char *level, rados_log_callback_t cb, void *arg)
 
     int rados_wait_for_latest_osdmap(rados_t cluster)
 
@@ -191,16 +199,11 @@ cdef extern from "rados/librados.h" nogil:
                           timeval * duration, uint8_t flags)
     int rados_unlock(rados_ioctx_t io, const char * o, const char * name, const char * cookie)
 
-    ctypedef void *rados_write_op_t
     rados_write_op_t rados_create_write_op()
     void rados_release_write_op(rados_write_op_t write_op)
 
-    ctypedef void *rados_read_op_t
     rados_read_op_t rados_create_read_op()
     void rados_release_read_op(rados_read_op_t read_op)
-
-    ctypedef void *rados_completion_t
-    ctypedef void (*rados_callback_t)(rados_completion_t cb, void *arg)
 
     int rados_aio_create_completion(void * cb_arg, rados_callback_t cb_complete, rados_callback_t cb_safe, rados_completion_t * pc)
     void rados_aio_release(rados_completion_t c)
@@ -407,10 +410,6 @@ def requires(*types):
     return wrapper
 
 
-#cdef int no_op_progress_callback(uint64_t offset, uint64_t total, void* ptr):
-#    return 0
-
-
 def cstr(val, name, encoding="utf-8", opt=False):
     """
     Create a byte string from a Python string
@@ -471,7 +470,7 @@ cdef char ** to_cstring_array(list_str, name):
     if ret == NULL:
         raise MemoryError("malloc failed")
     for i in xrange(len(list_str)):
-        ret[i] = PyString_AsString(list_str[i])  # cstr(list_str[i], name))
+        ret[i] = PyString_AsString(cstr(list_str[i], name))
     return ret
 
 
@@ -1046,7 +1045,9 @@ Rados object in state %s." % self.state)
         ioctx_name = cstr(ioctx_name, 'ioctx_name')
         cdef:
             rados_ioctx_t ioctx
-        ret = rados_ioctx_create(self.cluster, ioctx_name, &ioctx)
+            char *_ioctx_name = ioctx_name
+        with nogil:
+            ret = rados_ioctx_create(self.cluster, _ioctx_name, &ioctx)
         if ret < 0:
             raise make_ex(ret, "error opening pool '%s'" % ioctx_name)
         io = Ioctx(ioctx_name)
@@ -1059,7 +1060,7 @@ Rados object in state %s." % self.state)
         returns (int ret, string outbuf, string outs)
         """
         # NOTE(sileht): timeout is ignored because C API doesn't provide
-        # timeout argument, but kept to keep backcompat with old python binding
+        # timeout argument, but we keep it for backward compat with old python binding
 
         self.require_state("connected")
         cmd = [cstr(c, 'c') for c in cmd]
@@ -1116,7 +1117,7 @@ Rados object in state %s." % self.state)
         returns (int ret, string outbuf, string outs)
         """
         # NOTE(sileht): timeout is ignored because C API doesn't provide
-        # timeout argument, but kept to keep backcompat with old python binding
+        # timeout argument, but we keep it for backward compat with old python binding
         self.require_state("connected")
 
         cmd = [cstr(c, 'c') for c in cmd]
@@ -1158,7 +1159,7 @@ Rados object in state %s." % self.state)
         returns (int ret, string outbuf, string outs)
         """
         # NOTE(sileht): timeout is ignored because C API doesn't provide
-        # timeout argument, but kept to keep backcompat with old python binding
+        # timeout argument, but we keep it for backward compat with old python binding
         self.require_state("connected")
 
         pgid = cstr(pgid, 'pgid')
@@ -1197,7 +1198,9 @@ Rados object in state %s." % self.state)
 
     def wait_for_latest_osdmap(self):
         self.require_state("connected")
-        return rados_wait_for_latest_osdmap(self.cluster)
+        with nogil:
+            ret = rados_wait_for_latest_osdmap(self.cluster)
+        return ret
 
     def blacklist_add(self, client_address, expire_seconds=0):
         """
@@ -2251,56 +2254,55 @@ returned %d, but should return zero on success." % (self.name, ret))
             # itself and set ret_s to NULL, hence XDECREF).
             ref.Py_XDECREF(ret_s)
 
-#    def get_stats(self):
-#        # FIXME(sileht): test_rados.py doesn't have test for this
-#        """
-#        Get pool usage statistics
-#
-#        :returns: dict - contains the following keys:
-#
-#            - ``num_bytes`` (int) - size of pool in bytes
-#
-#            - ``num_kb`` (int) - size of pool in kbytes
-#
-#            - ``num_objects`` (int) - number of objects in the pool
-#
-#            - ``num_object_clones`` (int) - number of object clones
-#
-#            - ``num_object_copies`` (int) - number of object copies
-#
-#            - ``num_objects_missing_on_primary`` (int) - number of objets
-#                missing on primary
-#
-#            - ``num_objects_unfound`` (int) - number of unfound objects
-#
-#            - ``num_objects_degraded`` (int) - number of degraded objects
-#
-#            - ``num_rd`` (int) - bytes read
-#
-#            - ``num_rd_kb`` (int) - kbytes read
-#
-#            - ``num_wr`` (int) - bytes written
-#
-#            - ``num_wr_kb`` (int) - kbytes written
-#        """
-#        self.require_ioctx_open()
-#        stats = rados_pool_stat_t()
-#        ret = run_in_thread(self.librados.rados_ioctx_pool_stat,
-#                            (self.io, byref(stats)))
-#        if ret < 0:
-#            raise make_ex(ret, "Ioctx.get_stats(%s): get_stats failed" % self.name)
-#        return {'num_bytes': stats.num_bytes,
-#                'num_kb': stats.num_kb,
-#                'num_objects': stats.num_objects,
-#                'num_object_clones': stats.num_object_clones,
-#                'num_object_copies': stats.num_object_copies,
-#                "num_objects_missing_on_primary": stats.num_objects_missing_on_primary,
-#                "num_objects_unfound": stats.num_objects_unfound,
-#                "num_objects_degraded": stats.num_objects_degraded,
-#                "num_rd": stats.num_rd,
-#                "num_rd_kb": stats.num_rd_kb,
-#                "num_wr": stats.num_wr,
-#                "num_wr_kb": stats.num_wr_kb}
+    def get_stats(self):
+        """
+        Get pool usage statistics
+
+        :returns: dict - contains the following keys:
+
+            - ``num_bytes`` (int) - size of pool in bytes
+
+            - ``num_kb`` (int) - size of pool in kbytes
+
+            - ``num_objects`` (int) - number of objects in the pool
+
+            - ``num_object_clones`` (int) - number of object clones
+
+            - ``num_object_copies`` (int) - number of object copies
+
+            - ``num_objects_missing_on_primary`` (int) - number of objets
+                missing on primary
+
+            - ``num_objects_unfound`` (int) - number of unfound objects
+
+            - ``num_objects_degraded`` (int) - number of degraded objects
+
+            - ``num_rd`` (int) - bytes read
+
+            - ``num_rd_kb`` (int) - kbytes read
+
+            - ``num_wr`` (int) - bytes written
+
+            - ``num_wr_kb`` (int) - kbytes written
+        """
+        self.require_ioctx_open()
+        cdef rados_pool_stat_t stats
+        with nogil:
+            ret = rados_ioctx_pool_stat(self.io, &stats)
+        if ret < 0:
+            raise make_ex(ret, "Ioctx.get_stats(%s): get_stats failed" % self.name)
+        return {'num_bytes': stats.num_bytes,
+                'num_kb': stats.num_kb,
+                'num_objects': stats.num_objects,
+                'num_object_clones': stats.num_object_clones,
+                'num_object_copies': stats.num_object_copies,
+                "num_objects_missing_on_primary": stats.num_objects_missing_on_primary,
+                "num_objects_unfound": stats.num_objects_unfound,
+                "num_objects_degraded": stats.num_objects_degraded,
+                "num_rd": stats.num_rd,
+                "num_rd_kb": stats.num_rd_kb,
+                "num_wr": stats.num_wr,
+                "num_wr_kb": stats.num_wr_kb}
 
     @requires(('key', str_type))
     def remove_object(self, key):
@@ -3092,7 +3094,15 @@ MONITOR_LEVELS = [
     ]
 
 
-class MonitorLog(object):
+cdef int __monitor_callback(void *arg, const char *line, const char *who, 
+                             uint64_t sec, uint64_t nsec, uint64_t seq, 
+                             const char *level, const char *msg) with gil:
+    cdef object monitor = <object>arg
+    monitor.callback(monitor.arg, line, who, sec, nsec, seq, level, msg)
+    return 0
+
+
+cdef class MonitorLog(object):
     """
     For watching cluster log messages.  Instantiate an object and keep
     it around while callback is periodically called.  Construct with
@@ -3111,12 +3121,10 @@ class MonitorLog(object):
     callback's return value is ignored
     """
 
-    def monitor_log_callback(self, arg, line, who, sec, nsec, seq, level, msg):
-        """
-        Local callback wrapper, in case we decide to do something
-        """
-        self.callback(arg, line, who, sec, nsec, seq, level, msg)
-        return 0
+    cdef public:
+        object callback
+        object arg
+        object level
 
     def __init__(self, cluster, level, callback, arg):
         if level not in MONITOR_LEVELS:
@@ -3126,18 +3134,14 @@ class MonitorLog(object):
         self.level = level
         self.callback = callback
         self.arg = arg
-#        callback_factory = CFUNCTYPE(c_int,     # return type (really void)
-#                                     c_void_p,  # arg
-#                                     c_char_p,  # line
-#                                     c_char_p,  # who
-#                                     c_uint64,  # timestamp_sec
-#                                     c_uint64,  # timestamp_nsec
-#                                     c_ulong,   # seq
-#                                     c_char_p,  # level
-#                                     c_char_p)  # msg
-#        self.internal_callback = callback_factory(self.monitor_log_callback)
-#
-#        r = run_in_thread(cluster.librados.rados_monitor_log,
-#                          (cluster.cluster, level, self.internal_callback, arg))
-#        if r:
-#            raise make_ex(r, 'error calling rados_monitor_log')
+
+        cdef:
+            Rados _cluster = cluster
+            const char *_level = level
+            PyObject* _monitor = <PyObject*>self
+
+        r = rados_monitor_log(_cluster.cluster, _level, 
+                              <rados_log_callback_t>&__monitor_callback, 
+                              &_monitor)
+        if r:
+            raise make_ex(r, 'error calling rados_monitor_log')

@@ -3,7 +3,7 @@ from nose.tools import eq_ as eq, ok_ as ok, assert_raises
 from cradox import (Rados, Error, RadosStateError, Object, ObjectExists,
                    ObjectNotFound, ObjectBusy, requires, opt,
                    ANONYMOUS_AUID, ADMIN_AUID, LIBRADOS_ALL_NSPACES, WriteOpCtx, ReadOpCtx,
-                   LIBRADOS_SNAP_HEAD)
+                   LIBRADOS_SNAP_HEAD, MonitorLog)
 import time
 import threading
 import json
@@ -230,6 +230,27 @@ class TestRados(object):
     def test_blacklist_add(self):
         self.rados.blacklist_add("1.2.3.4/123", 1)
 
+    def test_get_cluster_stats(self):
+        stats = self.rados.get_cluster_stats()
+        assert stats['kb'] > 0
+        assert stats['kb_avail'] > 0
+        assert stats['kb_used'] > 0
+        assert stats['num_objects'] >= 0
+
+    def test_monitor_log(self):
+        lock = threading.Condition()
+        def cb(arg, line, who, sec, nsec, seq, level, msg):
+            eq(arg, "arg")
+            with lock:
+                lock.notify()
+            return 0
+
+        # FIXME(sileht): callback and MonitorLog are gc instantly if
+        # we don't hold a local reference here.
+        m = MonitorLog(self.rados, "debug", cb, "arg")
+        with lock:
+            lock.wait()
+
 class TestIoctx(object):
 
     def setUp(self):
@@ -248,6 +269,24 @@ class TestIoctx(object):
 
     def test_get_last_version(self):
         version = self.ioctx.get_last_version()
+        assert version
+
+    def test_get_stats(self):
+        self.ioctx.write('abc', b'abc')
+        eq(self.ioctx.read('abc'), b'abc')
+        stats = self.ioctx.get_stats()
+        eq(stats, {'num_objects_unfound': 0L,
+                   'num_objects_missing_on_primary': 0L,
+                   'num_object_clones': 0L,
+                   'num_objects': 1L,
+                   'num_object_copies': 0L,
+                   'num_bytes': 0L,
+                   'num_rd_kb': 0L,
+                   'num_wr_kb': 0L,
+                   'num_kb': 0L,
+                   'num_wr': 0L,
+                   'num_objects_degraded': 0L,
+                   'num_rd': 0L})
 
     def test_change_auid(self):
         self.ioctx.change_auid(ANONYMOUS_AUID)
