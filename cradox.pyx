@@ -638,13 +638,15 @@ Rados object in state %s." % self.state)
         
         cdef:
             int _argc = len(args)
-            const char **_argv = <const char **>to_cstring_array(args, 'args')
-            const char **_remargv = NULL
+            char **_argv = to_cstring_array(args, 'args')
+            char **_remargv = NULL
 
         try:
-            _remargv = <const char **>realloc_chk(_remargv, _argc)
+            _remargv = <char **>realloc_chk(_remargv, _argc)
             with nogil:
-                ret = rados_conf_parse_argv_remainder(self.cluster, _argc, _argv, _remargv)
+                ret = rados_conf_parse_argv_remainder(self.cluster, _argc, 
+                                                      <const char**>_argv, 
+                                                      <const char**>_remargv)
             if ret:
                 raise make_ex(ret, "error calling conf_parse_argv_remainder")
 
@@ -1087,10 +1089,10 @@ Rados object in state %s." % self.state)
 
         cdef:
             char *_target = opt_str(target)
-            const char **_cmd = <const char **>to_cstring_array(cmd, 'cmd')
+            char **_cmd = to_cstring_array(cmd, 'cmd')
             size_t _cmdlen = len(cmd)
 
-            const char *_inbuf = inbuf
+            char *_inbuf = inbuf
             size_t _inbuf_len = len(inbuf)
 
             char *_outbuf
@@ -1102,15 +1104,15 @@ Rados object in state %s." % self.state)
             if target:
                 with nogil:
                     ret = rados_mon_command_target(self.cluster, _target, 
-                                                _cmd, _cmdlen, 
-                                                _inbuf, _inbuf_len,
+                                                <const char **>_cmd, _cmdlen, 
+                                                <const char*>_inbuf, _inbuf_len,
                                                 &_outbuf, &_outbuf_len,
                                                 &_outs, &_outs_len)
             else:
                 with nogil:
                     ret = rados_mon_command(self.cluster,
-                                            _cmd, _cmdlen,
-                                            _inbuf, _inbuf_len,
+                                            <const char **>_cmd, _cmdlen,
+                                            <const char*>_inbuf, _inbuf_len,
                                             &_outbuf, &_outbuf_len,
                                             &_outs, &_outs_len)
 
@@ -1138,10 +1140,10 @@ Rados object in state %s." % self.state)
 
         cdef:
             int _osdid = osdid
-            const char **_cmd = <const char **>to_cstring_array(cmd, 'cmd')
+            char **_cmd = to_cstring_array(cmd, 'cmd')
             size_t _cmdlen = len(cmd)
 
-            const char *_inbuf = inbuf
+            char *_inbuf = inbuf
             size_t _inbuf_len = len(inbuf)
 
             char *_outbuf
@@ -1151,8 +1153,9 @@ Rados object in state %s." % self.state)
 
         try:
             with nogil:
-                ret = rados_osd_command(self.cluster, _osdid, _cmd, _cmdlen,
-                                        _inbuf, _inbuf_len,
+                ret = rados_osd_command(self.cluster, _osdid, 
+                                        <const char **>_cmd, _cmdlen,
+                                        <const char*>_inbuf, _inbuf_len,
                                         &_outbuf, &_outbuf_len, 
                                         &_outs, &_outs_len)
 
@@ -1181,10 +1184,10 @@ Rados object in state %s." % self.state)
 
         cdef:
             char *_pgid = pgid
-            const char **_cmd = <const char **>to_cstring_array(cmd, 'cmd')
+            char **_cmd = to_cstring_array(cmd, 'cmd')
             size_t _cmdlen = len(cmd)
 
-            const char *_inbuf = inbuf
+            char *_inbuf = inbuf
             size_t _inbuf_len = len(inbuf)
 
             char *_outbuf
@@ -1194,10 +1197,11 @@ Rados object in state %s." % self.state)
 
         try:
             with nogil:
-                ret = rados_pg_command(self.cluster, _pgid, _cmd, _cmdlen,
-                                    _inbuf, _inbuf_len,
-                                    &_outbuf, &_outbuf_len, 
-                                    &_outs, &_outs_len)
+                ret = rados_pg_command(self.cluster, _pgid, 
+                                       <const char **>_cmd, _cmdlen,
+                                       <const char *>_inbuf, _inbuf_len,
+                                       &_outbuf, &_outbuf_len, 
+                                       &_outs, &_outs_len)
 
             my_outs = decode_cstr(_outs[:_outs_len])
             my_outbuf = decode_cstr(_outbuf[:_outbuf_len])
@@ -1246,10 +1250,11 @@ Rados object in state %s." % self.state)
         cb = (callback, arg)
 
         cdef:
-            const char *_level = level
+            char *_level = level
             PyObject* _arg = <PyObject*>cb
         with nogil:
-            r = rados_monitor_log(self.cluster, _level, <rados_log_callback_t>&__monitor_callback, _arg)
+            r = rados_monitor_log(self.cluster, <const char*>_level, 
+                                  <rados_log_callback_t>&__monitor_callback, _arg)
         if r:
             raise make_ex(r, 'error calling rados_monitor_log')
         # NOTE(sileht): Prevents the callback method from being garbage collected
@@ -1279,19 +1284,25 @@ cdef class OmapIterator(object):
         cdef:
             char *key_ = NULL
             char *val_ = NULL
-            size_t len_ = 0
+            size_t len_
 
+        print("R6")
         with nogil:
             ret = rados_omap_get_next(self.ctx, &key_, &val_, &len_)
 
+        print("R7")
         if (ret != 0):
             raise make_ex(ret, "error iterating over the omap")
+        print("R74")
         if key_ == NULL:
             raise StopIteration()
+        print("R8")
         key = decode_cstr(key_)
         val = None
+        print("R9")
         if val_ != NULL:
             val = val_[:len_]
+        print("R10")
         return (key, val)
 
     def __del__(self):
@@ -2741,13 +2752,15 @@ returned %d, but should return zero on success." % (self.name, ret))
         cdef:
             WriteOp _write_op = write_op
             size_t key_num = len(keys)
-            const char **_keys = <const char**>to_cstring_array(keys, 'keys')
-            const char **_values = <const char**>to_bytes_array(values)
+            char **_keys = to_cstring_array(keys, 'keys')
+            char **_values = to_bytes_array(values)
             size_t *_lens = to_csize_t_array([len(v) for v in values])
 
         try:
             with nogil:
-                rados_write_op_omap_set(_write_op.write_op, _keys , _values, 
+                rados_write_op_omap_set(_write_op.write_op, 
+                                        <const char **>_keys , 
+                                        <const char **>_values, 
                                         <const size_t *>_lens, key_num)
         finally:
             free(_keys)
@@ -2870,12 +2883,13 @@ returned %d, but should return zero on success." % (self.name, ret))
         cdef:
             ReadOp _read_op = read_op
             rados_omap_iter_t iter_addr = NULL
-            const char **_keys = <const char**>to_cstring_array(keys, 'keys')
+            char **_keys = to_cstring_array(keys, 'keys')
             size_t key_num = len(keys)
             int prval
         try:
             with nogil:
-                rados_read_op_omap_get_vals_by_keys(_read_op.read_op, _keys, 
+                rados_read_op_omap_get_vals_by_keys(_read_op.read_op, 
+                                                    <const char**>_keys, 
                                                     key_num, &iter_addr,  &prval)
             it = OmapIterator(self)
             it.ctx = iter_addr
@@ -2896,11 +2910,11 @@ returned %d, but should return zero on success." % (self.name, ret))
         cdef:
             WriteOp _write_op = write_op
             size_t key_num = len(keys)
-            const char **_keys = <const char**>to_cstring_array(keys, 'keys')
+            char **_keys = to_cstring_array(keys, 'keys')
 
         try:
             with nogil:
-                rados_write_op_omap_rm_keys(_write_op.write_op, _keys, key_num)
+                rados_write_op_omap_rm_keys(_write_op.write_op, <const char**>_keys, key_num)
         finally:
             free(_keys)
 
