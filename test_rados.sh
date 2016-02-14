@@ -9,7 +9,7 @@ cy run
 cy bt
 EOF
 	opt="-dbg"
-	cmd="cygdb . -- --batch --command=test.gdb --args python $(which nosetests)"
+	cmd="cygdb . -- --batch --command=test.gdb --args python-dbg $(which nosetests)"
 	shift
 elif [ "$1" == "-b" ] ; then
 	cat > test.gdb <<EOF
@@ -18,7 +18,7 @@ run
 bt
 EOF
 	opt="-dbg"
-	cmd="gdb --batch --command=test.gdb --args python $(which nosetests)"
+	cmd="gdb --batch --command=test.gdb --args python-dbg $(which nosetests)"
 	shift
 
 else

@@ -240,14 +240,16 @@ class TestRados(object):
     def test_monitor_log(self):
         lock = threading.Condition()
         def cb(arg, line, who, sec, nsec, seq, level, msg):
+            # NOTE(sileht): the old pyrados API was received the pointer as int
+            # instead of the value of arg
             eq(arg, "arg")
             with lock:
                 lock.notify()
             return 0
 
-        # FIXME(sileht): callback and MonitorLog are gc instantly if
-        # we don't hold a local reference here.
-        m = MonitorLog(self.rados, "debug", cb, "arg")
+        # NOTE(sileht): force don't save the monitor into local var
+        # to ensure all references are correctly tracked into the lib
+        MonitorLog(self.rados, "debug", cb, "arg")
         with lock:
             lock.wait()
 
@@ -506,6 +508,24 @@ class TestIoctx(object):
             while count[0] < 2:
                 lock.wait()
         eq(comp.get_return_value(), 0)
+        contents = self.ioctx.read("foo")
+        eq(contents, b"bar")
+        [i.remove() for i in self.ioctx.list_objects()]
+
+    def test_aio_write_no_comp_ref(self):
+        lock = threading.Condition()
+        count = [0]
+        def cb(blah):
+            with lock:
+                count[0] += 1
+                lock.notify()
+            return 0
+        # NOTE(sileht): force don't save the comp into local var
+        # to ensure all references are correctly tracked into the lib
+        self.ioctx.aio_write("foo", b"bar", 0, cb, cb)
+        with lock:
+            while count[0] < 2:
+                lock.wait()
         contents = self.ioctx.read("foo")
         eq(contents, b"bar")
         [i.remove() for i in self.ioctx.list_objects()]

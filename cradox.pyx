@@ -483,6 +483,15 @@ cdef char ** to_bytes_array(list_bytes):
     return ret
 
 
+
+cdef int __monitor_callback(void *arg, const char *line, const char *who, 
+                             uint64_t sec, uint64_t nsec, uint64_t seq, 
+                             const char *level, const char *msg) with gil:
+    cdef object cb_info = <object>arg
+    cb_info[0](cb_info[1], line, who, sec, nsec, seq, level, msg)
+    return 0
+
+
 class Version(object):
     """ Version information """
     def __init__(self, major, minor, extra):
@@ -502,6 +511,11 @@ cdef class Rados(object):
     cdef:
         rados_t cluster
         public object state
+        public object monitor_callbacks
+        public object parsed_args
+        public object conf_defaults
+        public object conffile
+        public object rados_id
 
     # TODO(sileht): reenable this check
     #@requires(('rados_id', opt(str_type)), ('name', opt(str_type)), ('clustername', opt(str_type)),
@@ -511,11 +525,11 @@ cdef class Rados(object):
 
         PyEval_InitThreads()
 
-        # TODO(sileht): fill me
-        #self.parsed_args = []
-        #self.conf_defaults = conf_defaults
-        #self.conffile = conffile
-        #self.rados_id = rados_id
+        self.monitor_callbacks = []
+        self.parsed_args = []
+        self.conf_defaults = conf_defaults
+        self.conffile = conffile
+        self.rados_id = rados_id
 
         if rados_id and name:
             raise Error("Rados(): can't supply both rados_id and name")
@@ -637,8 +651,7 @@ Rados object in state %s." % self.state)
             # _remargv was allocated with fixed argc; collapse return
             # list to eliminate any missing args
             retargs = [a for a in _remargv[:_argc] if a is not None]
-            # NOTE(sileht): fill me
-            # self.parsed_args = args
+            self.parsed_args = args
             return retargs
         finally:
             free(_argv)
@@ -1224,6 +1237,25 @@ Rados object in state %s." % self.state)
         if ret < 0:
             raise make_ex(ret, "error blacklisting client '%s'" % client_address)
 
+    def monitor_log(self, level, callback, arg):
+        if level not in MONITOR_LEVELS:
+            raise LogicError("invalid monitor level " + level)
+        if not callable(callback):
+            raise LogicError("callback must be a callable function")
+
+        cb = (callback, arg)
+
+        cdef:
+            const char *_level = level
+            PyObject* _arg = <PyObject*>cb
+        with nogil:
+            r = rados_monitor_log(self.cluster, _level, <rados_log_callback_t>&__monitor_callback, _arg)
+        if r:
+            raise make_ex(r, 'error calling rados_monitor_log')
+        # NOTE(sileht): Prevents the callback method from being garbage collected
+        self.monitor_callbacks.append(cb)
+
+
 cdef class OmapIterator(object):
     """Omap iterator"""
 
@@ -1576,7 +1608,29 @@ cdef class Completion(object):
         with nogil:
             rados_aio_release(self.rados_comp)
 
+    def _complete(self):
+        self.oncomplete(self)
+        with self.ioctx.lock:
+            if self.oncomplete:
+                self.ioctx.complete_completions.remove(self)
+        print("FREED COMPLETE")
 
+    def _safe(self):
+        self.onsafe(self)
+        with self.ioctx.lock:
+            if self.onsafe:
+                self.ioctx.safe_completions.remove(self)
+        print("FREED SAFE")
+
+    def _cleanup(self):
+        with self.ioctx.lock:
+            if self.oncomplete:
+                self.ioctx.complete_completions.remove(self)
+            if self.onsafe:
+                self.ioctx.safe_completions.remove(self)
+        print("FREED ALL")
+
+        
 cdef class OpCtx(object):
     def __enter__(self):
         self.create()
@@ -1647,12 +1701,21 @@ cdef class Ioctx(object):
         public char *locator_key
         public char *nspace
 
+        # FIXME(sileht): we need to track of leaving completion objects
+        # I guess we can do that in a lighter ways
+        public object safe_completions
+        public object complete_completions
+        public object lock
+
     def __init__(self, name):
         self.name = name
         self.state = "open"
 
         self.locator_key = ""
         self.nspace = ""
+        self.lock = threading.Lock()
+        self.safe_completions = []
+        self.complete_completions = []
 
     def __enter__(self):
         return self
@@ -1663,6 +1726,14 @@ cdef class Ioctx(object):
 
     def __del__(self):
         self.close()
+
+    def __track_completion(self, completion_obj):
+        if completion_obj.oncomplete:
+            with self.lock:
+                self.complete_completions.append(completion_obj)
+        if completion_obj.onsafe:
+            with self.lock:
+                self.safe_completions.append(completion_obj)
 
     cdef __get_completion(self, oncomplete, onsafe):
         """
@@ -1738,9 +1809,10 @@ cdef class Ioctx(object):
 
         with nogil:
             ret = rados_aio_write(self.io, _object_name, completion.rados_comp, 
-                                  _to_write, size, _offset)
+                                _to_write, size, _offset)
         if ret < 0:
             raise make_ex(ret, "error writing object %s" % object_name)
+        self.__track_completion(completion)
         return completion
 
     def aio_write_full(self, object_name, to_write,
@@ -1776,13 +1848,13 @@ cdef class Ioctx(object):
             size_t size = len(to_write)
 
         completion = self.__get_completion(oncomplete, onsafe)
-
         with nogil:
             ret = rados_aio_write_full(self.io, _object_name, 
-                                       completion.rados_comp, 
-                                       _to_write, size)
+                                    completion.rados_comp, 
+                                    _to_write, size)
         if ret < 0:
             raise make_ex(ret, "error writing object %s" % object_name)
+        self.__track_completion(completion)
         return completion
 
     def aio_append(self, object_name, to_append, oncomplete=None, onsafe=None):
@@ -1816,13 +1888,13 @@ cdef class Ioctx(object):
             size_t size = len(to_append)
 
         completion = self.__get_completion(oncomplete, onsafe)
-
         with nogil:
             ret = rados_aio_append(self.io, _object_name, 
-                                   completion.rados_comp, 
-                                   _to_append, size)
+                                completion.rados_comp, 
+                                _to_append, size)
         if ret < 0:
             raise make_ex(ret, "error appending object %s" % object_name)
+        self.__track_completion(completion)
         return completion
 
     def aio_flush(self):
@@ -1883,18 +1955,18 @@ cdef class Ioctx(object):
                 ref.Py_XDECREF(ret_s)
 
         completion = self.__get_completion(oncomplete_, None)
-
         ret_s = PyBytes_FromStringAndSize(NULL, length)
         try:
             ret_buf = PyBytes_AsString(ret_s)
             with nogil:
                 ret = rados_aio_read(self.io, _object_name, completion.rados_comp,
-                                     ret_buf, _length, _offset)
+                                    ret_buf, _length, _offset)
             if ret < 0:
                 raise make_ex(ret, "error reading %s" % object_name)
-        except:
+            self.__track_completion(completion)
+            return completion
+        except Exception:
             ref.Py_XDECREF(ret_s)
-        return completion
 
     def aio_remove(self, object_name, oncomplete=None, onsafe=None):
         """
@@ -1921,9 +1993,10 @@ cdef class Ioctx(object):
         completion = self.__get_completion(oncomplete, onsafe)
         with nogil:
             ret = rados_aio_remove(self.io, _object_name,
-                                   completion.rados_comp)
+                                completion.rados_comp)
         if ret < 0:
             raise make_ex(ret, "error removing %s" % object_name)
+        self.__track_completion(completion)
         return completion
 
     def require_ioctx_open(self):
@@ -3094,15 +3167,9 @@ MONITOR_LEVELS = [
     ]
 
 
-cdef int __monitor_callback(void *arg, const char *line, const char *who, 
-                             uint64_t sec, uint64_t nsec, uint64_t seq, 
-                             const char *level, const char *msg) with gil:
-    cdef object monitor = <object>arg
-    monitor.callback(monitor.arg, line, who, sec, nsec, seq, level, msg)
-    return 0
-
-
-cdef class MonitorLog(object):
+class MonitorLog(object):
+    # NOTE(sileht): Keep this class for backward compat
+    # method moved to Rados.monitor_log()
     """
     For watching cluster log messages.  Instantiate an object and keep
     it around while callback is periodically called.  Construct with
@@ -3120,28 +3187,10 @@ cdef class MonitorLog(object):
         msg (the message itself)
     callback's return value is ignored
     """
-
-    cdef public:
-        object callback
-        object arg
-        object level
-
     def __init__(self, cluster, level, callback, arg):
-        if level not in MONITOR_LEVELS:
-            raise LogicError("invalid monitor level " + level)
-        if not callable(callback):
-            raise LogicError("callback must be a callable function")
         self.level = level
         self.callback = callback
         self.arg = arg
+        self.cluster = cluster
+        self.cluster.monitor_log(level, callback, arg)
 
-        cdef:
-            Rados _cluster = cluster
-            const char *_level = level
-            PyObject* _monitor = <PyObject*>self
-
-        r = rados_monitor_log(_cluster.cluster, _level, 
-                              <rados_log_callback_t>&__monitor_callback, 
-                              &_monitor)
-        if r:
-            raise make_ex(r, 'error calling rados_monitor_log')
