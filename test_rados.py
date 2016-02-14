@@ -271,16 +271,14 @@ class TestIoctx(object):
 
     def test_get_last_version(self):
         version = self.ioctx.get_last_version()
-        assert version
+        assert version >= 0
 
     def test_get_stats(self):
-        self.ioctx.write('abc', b'abc')
-        eq(self.ioctx.read('abc'), b'abc')
-        stats = self.ioctx.get_stats()
+	stats = self.ioctx.get_stats()
         eq(stats, {'num_objects_unfound': 0L,
                    'num_objects_missing_on_primary': 0L,
                    'num_object_clones': 0L,
-                   'num_objects': 1L,
+                   'num_objects': 0L,
                    'num_object_copies': 0L,
                    'num_bytes': 0L,
                    'num_rd_kb': 0L,
@@ -437,6 +435,15 @@ class TestIoctx(object):
             self.ioctx.operate_read_op(read_op, "hw")
             iter.next()
             eq(list(iter), [("2", b"bbb"), ("3", b"ccc"), ("4", b"\x04\x04\x04\x04")])
+        with ReadOpCtx(self.ioctx) as read_op:
+            iter, ret = self.ioctx.get_omap_vals(read_op, "2", "", 4)
+            self.ioctx.operate_read_op(read_op, "hw")
+            eq(("3", b"ccc"), iter.next())
+            eq(list(iter), [("4", b"\x04\x04\x04\x04")])
+        with ReadOpCtx(self.ioctx) as read_op:
+            iter, ret = self.ioctx.get_omap_vals(read_op, "", "2", 4)
+            self.ioctx.operate_read_op(read_op, "hw")
+            eq(list(iter), [("2", b"bbb")])
 
     def test_get_omap_vals_by_keys(self):
         keys = ("1", "2", "3", "4")

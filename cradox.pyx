@@ -1639,14 +1639,12 @@ cdef class Completion(object):
         with self.ioctx.lock:
             if self.oncomplete:
                 self.ioctx.complete_completions.remove(self)
-        print("FREED COMPLETE")
 
     def _safe(self):
         self.onsafe(self)
         with self.ioctx.lock:
             if self.onsafe:
                 self.ioctx.safe_completions.remove(self)
-        print("FREED SAFE")
 
     def _cleanup(self):
         with self.ioctx.lock:
@@ -1654,13 +1652,11 @@ cdef class Completion(object):
                 self.ioctx.complete_completions.remove(self)
             if self.onsafe:
                 self.ioctx.safe_completions.remove(self)
-        print("FREED ALL")
 
 
-cdef class OpCtx(object):
+class OpCtx(object):
     def __enter__(self):
-        self.create()
-        return self
+        return self.create()
 
     def __exit__(self, type, msg, traceback):
         self.release()
@@ -1689,6 +1685,7 @@ cdef class ReadOp(object):
     def create(self):
         with nogil:
             self.read_op = rados_create_read_op()
+        return self
 
     def release(self):
         with nogil:
@@ -2774,9 +2771,9 @@ returned %d, but should return zero on success." % (self.name, ret))
         try:
             with nogil:
                 rados_write_op_omap_set(_write_op.write_op,
-                                        <const char **>_keys ,
-                                        <const char **>_values,
-                                        <const size_t *>_lens, key_num)
+                                        <const char**>_keys,
+                                        <const char**>_values,
+                                        <const size_t*>_lens, key_num)
         finally:
             free(_keys)
             free(_values)
@@ -2841,15 +2838,15 @@ returned %d, but should return zero on success." % (self.name, ret))
         :returns: an iterator over the the requested omap values, return value from this action
         """
 
-        start_after = cstr(start_after, 'start_after')
-        filter_prefix = cstr(filter_prefix, 'filter_prefix')
+        start_after = cstr(start_after, 'start_after') if start_after else None
+        filter_prefix = cstr(filter_prefix, 'filter_prefix') if filter_prefix else None
         cdef:
-            char *_start_after = start_after
-            char *_filter_prefix = filter_prefix
+            char *_start_after = opt_str(start_after)
+            char *_filter_prefix = opt_str(filter_prefix)
             ReadOp _read_op = read_op
             rados_omap_iter_t iter_addr = NULL
             int _max_return = max_return
-            int prval
+            int prval = 0
 
         with nogil:
             rados_read_op_omap_get_vals(_read_op.read_op, _start_after, _filter_prefix,
@@ -2870,9 +2867,9 @@ returned %d, but should return zero on success." % (self.name, ret))
         :type max_return: int
         :returns: an iterator over the the requested omap values, return value from this action
         """
-        start_after = cstr(start_after, 'start_after')
+        start_after = cstr(start_after, 'start_after') if start_after else None
         cdef:
-            char *_start_after = start_after
+            char *_start_after = opt_str(start_after)
             ReadOp _read_op = read_op
             rados_omap_iter_t iter_addr = NULL
             int _max_return = max_return
@@ -2901,6 +2898,7 @@ returned %d, but should return zero on success." % (self.name, ret))
             char **_keys = to_cstring_array(keys, 'keys')
             size_t key_num = len(keys)
             int prval
+
         try:
             with nogil:
                 rados_read_op_omap_get_vals_by_keys(_read_op.read_op,

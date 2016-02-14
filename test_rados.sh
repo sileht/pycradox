@@ -32,4 +32,4 @@ for i in $(rados lspools | grep -e foo -e test_pool -e foo-cache -e 黄) ; do
 done ; 
 
 python$opt setup.py build_ext --inplace --build-lib .
-$cmd -xvds test_rados$tests
+$cmd -vds test_rados$tests
