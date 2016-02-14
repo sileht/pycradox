@@ -43,7 +43,6 @@ setup(
         Extension("cradox",
             ["cradox.pyx"],
             libraries=["rados"],
-            extra_compile_args=["-O0"]
             )
     ], build_dir=os.environ.get("CYTHON_BUILD_DIR", None),
     output_dir=".",

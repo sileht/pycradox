@@ -463,21 +463,15 @@ class TestIoctx(object):
     def test_clear_omap(self):
         keys = ("1", "2", "3")
         values = (b"aaa", b"bbb", b"ccc")
-        print("W")
         with WriteOpCtx(self.ioctx) as write_op:
             self.ioctx.set_omap(write_op, keys, values)
             self.ioctx.operate_write_op(write_op, "hw")
-        print("C")
         with WriteOpCtx(self.ioctx) as write_op_1:
             self.ioctx.clear_omap(write_op_1)
             self.ioctx.operate_write_op(write_op_1, "hw")
-        print("R")
         with ReadOpCtx(self.ioctx) as read_op:
-            print("R1")
             iter, ret = self.ioctx.get_omap_vals_by_keys(read_op,("1",))
-            print("R2")
             self.ioctx.operate_read_op(read_op, "hw")
-            print("R3")
             eq(list(iter), [])
 
     def test_locator(self):
