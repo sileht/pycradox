@@ -14,7 +14,6 @@ method.
 # Copyright 2016 Mehdi Abaakouk <sileht@redhat.com>
 
 from cpython cimport PyObject, ref, exc, array
-from cpython.string cimport PyString_AsString
 from cpython.dict cimport PyDict_New
 from libc cimport errno
 from libc.stdint cimport *
@@ -268,7 +267,7 @@ LIBRADOS_OPERATION_IGNORE_CACHE = _LIBRADOS_OPERATION_IGNORE_CACHE
 LIBRADOS_OPERATION_SKIPRWLOCKS = _LIBRADOS_OPERATION_SKIPRWLOCKS
 LIBRADOS_OPERATION_IGNORE_OVERLAY = _LIBRADOS_OPERATION_IGNORE_OVERLAY
 
-LIBRADOS_ALL_NSPACES = _LIBRADOS_ALL_NSPACES
+LIBRADOS_ALL_NSPACES = _LIBRADOS_ALL_NSPACES.decode('utf-8')
 
 ANONYMOUS_AUID = 0xffffffffffffffff
 ADMIN_AUID = 0
@@ -490,7 +489,8 @@ cdef char ** to_cstring_array(list_str, name):
     if ret == NULL:
         raise MemoryError("malloc failed")
     for i in xrange(len(list_str)):
-        ret[i] = PyString_AsString(cstr(list_str[i], name))
+        val = cstr(list_str[i], name)
+        ret[i] = <char *>val
     return ret
 
 
@@ -672,7 +672,8 @@ Rados object in state %s." % self.state)
 
             # _remargv was allocated with fixed argc; collapse return
             # list to eliminate any missing args
-            retargs = [a for a in _remargv[:_argc] if a is not None]
+            retargs = [decode_cstr(a) for a in _remargv[:_argc]
+                       if a is not None]
             self.parsed_args = args
             return retargs
         finally:
@@ -1027,7 +1028,7 @@ Rados object in state %s." % self.state)
                     size *= 2
                 elif ret >= 0:
                     break
-            return [decode_cstr(name) for name in c_names[:ret].split('\0')
+            return [name for name in decode_cstr(c_names[:ret]).split('\0')
                     if name]
         finally:
             free(c_names)
@@ -1136,8 +1137,8 @@ Rados object in state %s." % self.state)
                                             &_outbuf, &_outbuf_len,
                                             &_outs, &_outs_len)
 
-            my_outs = decode_cstr(_outs[:_outs_len])
-            my_outbuf = decode_cstr(_outbuf[:_outbuf_len])
+            my_outs = _outs[:_outs_len]
+            my_outbuf = _outbuf[:_outbuf_len]
             if _outs_len:
                 rados_buffer_free(_outs)
             if _outbuf_len:
@@ -1269,6 +1270,7 @@ Rados object in state %s." % self.state)
 
         cb = (callback, arg)
 
+        level = cstr(level, 'level')
         cdef:
             char *_level = level
             PyObject* _arg = <PyObject*>cb
@@ -1418,7 +1420,7 @@ in '%s'" % self.oid)
         if name_ == NULL:
             raise StopIteration()
         name = decode_cstr(name_)
-        val = decode_cstr(val_[:len_])
+        val = val_[:len_]
         return (name, val)
 
     def __del__(self):
@@ -1489,7 +1491,7 @@ ioctx '%s'" % self.ioctx.name)
                 else:
                     name_len = name_len * 2
 
-            snap = Snap(self.ioctx, decode_cstr(name[:name_len]), snap_id)
+            snap = Snap(self.ioctx, decode_cstr(name[:name_len]).rstrip('\0'), snap_id)
             self.cur_snap = self.cur_snap + 1
             return snap
         finally:
@@ -1499,13 +1501,13 @@ ioctx '%s'" % self.ioctx.name)
 cdef class Snap(object):
     """Snapshot object"""
     cdef public Ioctx ioctx
-    cdef public char* name
+    cdef public object name
 
     # NOTE(sileht): old API was storing the ctypes object
     # instead of the value ....
     cdef public rados_snap_t snap_id
 
-    def __cinit__(self, Ioctx ioctx, char* name, rados_snap_t snap_id):
+    def __cinit__(self, Ioctx ioctx, object name, rados_snap_t snap_id):
         self.ioctx = ioctx
         self.name = name
         self.snap_id = snap_id
@@ -1719,8 +1721,8 @@ cdef class Ioctx(object):
         rados_ioctx_t io
         public char *name
         public char *state
-        public char *locator_key
-        public char *nspace
+        public object locator_key
+        public object nspace
 
         # TODO(sileht): we need to track leaving completion objects
         # I guess we can do that in a lighter ways, but keep code simple
@@ -2067,8 +2069,8 @@ cdef class Ioctx(object):
         :raises: :class:`TypeError`
         """
         self.require_ioctx_open()
-        loc_key = cstr(loc_key, 'loc_key')
-        cdef char *_loc_key = loc_key
+        cloc_key = cstr(loc_key, 'loc_key')
+        cdef char *_loc_key = cloc_key
         with nogil:
             rados_ioctx_locator_set_key(self.io, _loc_key)
         self.locator_key = loc_key
@@ -2116,8 +2118,8 @@ cdef class Ioctx(object):
         self.require_ioctx_open()
         if nspace is None:
             nspace = ""
-        nspace = cstr(nspace, 'nspace')
-        cdef char *_nspace = nspace
+        cnspace = cstr(nspace, 'nspace')
+        cdef char *_nspace = cnspace
         with nogil:
             rados_ioctx_set_namespace(self.io, _nspace)
         self.nspace = nspace
@@ -2515,7 +2517,7 @@ returned %d, but should return zero on success." % (self.name, ret))
                     raise make_ex(ret, "Failed to get xattr %r" % xattr_name)
                 else:
                     break
-            return decode_cstr(ret_buf[:ret])
+            return ret_buf[:ret]
         finally:
             free(ret_buf)
 
@@ -2667,9 +2669,9 @@ returned %d, but should return zero on success." % (self.name, ret))
         :returns: Snap - on success
         """
         self.require_ioctx_open()
-        snap_name = cstr(snap_name, 'snap_name')
+        csnap_name = cstr(snap_name, 'snap_name')
         cdef:
-            char *_snap_name = snap_name
+            char *_snap_name = csnap_name
             rados_snap_t snap_id
 
         with nogil:

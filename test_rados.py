@@ -274,19 +274,19 @@ class TestIoctx(object):
         assert version >= 0
 
     def test_get_stats(self):
-	stats = self.ioctx.get_stats()
-        eq(stats, {'num_objects_unfound': 0L,
-                   'num_objects_missing_on_primary': 0L,
-                   'num_object_clones': 0L,
-                   'num_objects': 0L,
-                   'num_object_copies': 0L,
-                   'num_bytes': 0L,
-                   'num_rd_kb': 0L,
-                   'num_wr_kb': 0L,
-                   'num_kb': 0L,
-                   'num_wr': 0L,
-                   'num_objects_degraded': 0L,
-                   'num_rd': 0L})
+        stats = self.ioctx.get_stats()
+        eq(stats, {'num_objects_unfound': 0,
+                   'num_objects_missing_on_primary': 0,
+                   'num_object_clones': 0,
+                   'num_objects': 0,
+                   'num_object_copies': 0,
+                   'num_bytes': 0,
+                   'num_rd_kb': 0,
+                   'num_wr_kb': 0,
+                   'num_kb': 0,
+                   'num_wr': 0,
+                   'num_objects_degraded': 0,
+                   'num_rd': 0})
 
     def test_change_auid(self):
         self.ioctx.change_auid(ANONYMOUS_AUID)
@@ -676,13 +676,13 @@ class TestIoctx(object):
         assert_raises(ObjectNotFound, self.ioctx.unlock, "foo", "lock", "locker2")
 
     def test_execute(self):
-        self.ioctx.write("foo", "") # ensure object exists
+        self.ioctx.write("foo", b"") # ensure object exists
 
-        ret, buf = self.ioctx.execute("foo", "hello", "say_hello", "")
-        eq(buf, "Hello, world!")
+        ret, buf = self.ioctx.execute("foo", "hello", "say_hello", b"")
+        eq(buf, b"Hello, world!")
 
-        ret, buf = self.ioctx.execute("foo", "hello", "say_hello", "nose")
-        eq(buf, "Hello, nose!")
+        ret, buf = self.ioctx.execute("foo", "hello", "say_hello", b"nose")
+        eq(buf, b"Hello, nose!")
 
 class TestObject(object):
 

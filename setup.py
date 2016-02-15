@@ -6,8 +6,14 @@ import sys
 
 from setuptools.command.egg_info import egg_info
 from distutils.core import setup
+from distutils import ccompiler
 from distutils.extension import Extension
 from Cython.Build import cythonize
+
+
+#with open(os.path.join(os.path.dirname(__file__), 'cradox.pxi'), 'w') as fd:
+#    hammer = ccompiler.has_function('rados_pool_get_base_tier', libraries=('rados',))
+#    fd.write('DEF HAMMER = %d\n' % int(hammer))
 
 
 class EggInfoCommand(egg_info):

@@ -9,8 +9,8 @@ cy run
 cy bt
 EOF
 	opt="-dbg"
-    opt_setup="--cython-gdb"
-    python="python-dbg"
+	opt_setup="--cython-gdb"
+	python="python-dbg"
 	launcher="cygdb . -- --batch --command=test.gdb --args"
 	shift
 elif [ "$1" == "-b" ] ; then
@@ -20,14 +20,19 @@ run
 bt
 EOF
 	opt="-dbg"
-    opt_setup="--cython-gdb"
-    python="python-dbg"
+	opt_setup="--cython-gdb"
+	python="python-dbg"
 	launcher="gdb --batch --command=test.gdb --args"
 	shift
+elif [ "$1" == "-3" ]; then
+	shift
+	python="python3"
+	launcher=
 else
-    python="python"
+	python="python"
 	launcher=
 fi
+
 [ "$@" ] && tests=":$@"
 
 ceph osd unset noup
