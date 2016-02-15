@@ -25,7 +25,6 @@ import sys
 import threading
 import time
 
-from collections import Iterable, Iterator
 from datetime import datetime
 from functools import partial, wraps
 from itertools import chain
@@ -61,6 +60,10 @@ cdef extern from "sys/time.h":
         suseconds_t tv_usec
 
 
+cdef extern from "rados/rados_types.h" nogil:
+    cdef char* _LIBRADOS_ALL_NSPACES "LIBRADOS_ALL_NSPACES"
+
+
 cdef extern from "rados/librados.h" nogil:
     enum:
         _LIBRADOS_OP_FLAG_EXCL "LIBRADOS_OP_FLAG_EXCL"
@@ -80,7 +83,6 @@ cdef extern from "rados/librados.h" nogil:
         _LIBRADOS_OPERATION_IGNORE_CACHE "LIBRADOS_OPERATION_IGNORE_CACHE"
         _LIBRADOS_OPERATION_SKIPRWLOCKS "LIBRADOS_OPERATION_SKIPRWLOCKS"
         _LIBRADOS_OPERATION_IGNORE_OVERLAY "LIBRADOS_OPERATION_IGNORE_OVERLAY"
-#        _LIBRADOS_OPERATION_FULL_TRY "LIBRADOS_OPERATION_FULL_TRY"
 
     cdef uint64_t _LIBRADOS_SNAP_HEAD "LIBRADOS_SNAP_HEAD"
 
@@ -265,11 +267,6 @@ LIBRADOS_OPERATION_ORDER_READS_WRITES = _LIBRADOS_OPERATION_ORDER_READS_WRITES
 LIBRADOS_OPERATION_IGNORE_CACHE = _LIBRADOS_OPERATION_IGNORE_CACHE
 LIBRADOS_OPERATION_SKIPRWLOCKS = _LIBRADOS_OPERATION_SKIPRWLOCKS
 LIBRADOS_OPERATION_IGNORE_OVERLAY = _LIBRADOS_OPERATION_IGNORE_OVERLAY
-#LIBRADOS_OPERATION_FULL_TRY = _LIBRADOS_OPERATION_FULL_TRY
-
-
-cdef extern from "rados/rados_types.h" nogil:
-    cdef char* _LIBRADOS_ALL_NSPACES "LIBRADOS_ALL_NSPACES"
 
 LIBRADOS_ALL_NSPACES = _LIBRADOS_ALL_NSPACES
 
@@ -418,7 +415,9 @@ def requires(*types):
             raise TypeError('%s must be %s' % (arg_name, arg_type.__name__))
 
     def wrapper(f):
-        #@wraps(f)
+        # FIXME(sileht): this stop with
+        # AttributeError: 'method_descriptor' object has no attribute '__module__'
+        # @wraps(f)
         def validate_func(*args, **kwargs):
             # ignore the `self` arg
             pos_args = zip(args[1:], types)
@@ -538,14 +537,14 @@ cdef class Rados(object):
         public object conffile
         public object rados_id
 
-    # TODO(sileht): reenable this check
-    #@requires(('rados_id', opt(str_type)), ('name', opt(str_type)), ('clustername', opt(str_type)),
-    #          ('conffile', opt(str_type)))
-    def __init__(self, rados_id=None, name=None, clustername=None,
-                 conf_defaults=None, conffile=None, conf=None, flags=0):
-
+    def __init__(self, *args, **kwargs):
         PyEval_InitThreads()
+        self.__setup(*args, **kwargs)
 
+    @requires(('rados_id', opt(str_type)), ('name', opt(str_type)), ('clustername', opt(str_type)),
+              ('conffile', opt(str_type)))
+    def __setup(self, rados_id=None, name=None, clustername=None,
+                conf_defaults=None, conffile=None, conf=None, flags=0):
         self.monitor_callbacks = []
         self.parsed_args = []
         self.conf_defaults = conf_defaults
@@ -1360,7 +1359,6 @@ cdef class ObjectIterator(object):
             const char *nspace_ = NULL
 
         with nogil:
-            # FIXME(sileht): locator nspace
             ret = rados_nobjects_list_next(self.ctx, &key_, &locator_, &nspace_)
         if ret < 0:
             raise StopIteration()
@@ -1724,8 +1722,9 @@ cdef class Ioctx(object):
         public char *locator_key
         public char *nspace
 
-        # FIXME(sileht): we need to track of leaving completion objects
-        # I guess we can do that in a lighter ways
+        # TODO(sileht): we need to track leaving completion objects
+        # I guess we can do that in a lighter ways, but keep code simple
+        # as before for now
         public object safe_completions
         public object complete_completions
         public object lock
@@ -2082,7 +2081,7 @@ cdef class Ioctx(object):
         """
         return self.locator_key
 
-    #@requires(('snap_id', int))
+    @requires(('snap_id', long))
     def set_read(self, snap_id):
         """
         Set the snapshot for reading objects.

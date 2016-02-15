@@ -9,7 +9,9 @@ cy run
 cy bt
 EOF
 	opt="-dbg"
-	cmd="cygdb . -- --batch --command=test.gdb --args python-dbg $(which nosetests)"
+    opt_setup="--cython-gdb"
+    python="python-dbg"
+	launcher="cygdb . -- --batch --command=test.gdb --args"
 	shift
 elif [ "$1" == "-b" ] ; then
 	cat > test.gdb <<EOF
@@ -18,11 +20,13 @@ run
 bt
 EOF
 	opt="-dbg"
-	cmd="gdb --batch --command=test.gdb --args python-dbg $(which nosetests)"
+    opt_setup="--cython-gdb"
+    python="python-dbg"
+	launcher="gdb --batch --command=test.gdb --args"
 	shift
-
 else
-	cmd="nosetests"
+    python="python"
+	launcher=
 fi
 [ "$@" ] && tests=":$@"
 
@@ -31,5 +35,6 @@ for i in $(rados lspools | grep -e foo -e test_pool -e foo-cache -e 黄) ; do
 	rados rmpool $i $i --yes-i-really-really-mean-it ; 
 done ; 
 
-python$opt setup.py build_ext --inplace --build-lib .
-$cmd -vds test_rados$tests
+export CYTHON_OUTPUT_DIR="."
+$python setup.py build_ext --inplace $opt_setup --build-lib .
+$launcher $python $(which nosetests) -vds test_rados$tests
