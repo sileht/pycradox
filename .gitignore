@@ -1,5 +1,7 @@
 *.c
 *.so
 *.pyc
+tmp
+cradox.pyx
 build
 cython_debug
