@@ -785,3 +785,16 @@ class TestCommand(object):
         out = json.loads(err)
         eq(out['blocksize'], cmd['size'])
         eq(out['bytes_written'], cmd['count'])
+
+    def test_ceph_osd_pool_create_utf8(self):
+        if _python2:
+            # Use encoded bytestring
+            poolname = b"\351\273\204"
+        else:
+            poolname = "\u9ec4"
+
+        cmd = {"prefix": "osd pool create", "pg_num": 16, "pool": poolname}
+        ret, buf, out = self.rados.mon_command(json.dumps(cmd), b'')
+        eq(ret, 0)
+        assert len(out) > 0
+        eq(u"pool '\u9ec4' created", out)
