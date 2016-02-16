@@ -10,6 +10,8 @@ from distutils import ccompiler
 from distutils.extension import Extension
 from Cython.Build import cythonize
 
+VERSION="1.0.3"
+
 
 def generate_pyx(recent=None):
     if recent is None:
@@ -72,7 +74,7 @@ if __name__ == '__main__':
 
     setup(
         name='cradox',
-        version="1.0.2",
+        version=VERSION,
         license="LGPL 2.1",
         author="Mehdi Abaakouk",
         author_email="sileht@sileht.net",
