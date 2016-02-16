@@ -61,21 +61,30 @@ if (len(sys.argv) >= 2 and
 else:
     generate_pyx()
 
+
+with open(os.path.join(os.path.dirname(__file__), "README.rst")) as f:
+    description = f.read()
+
 setup(
     name='cradox',
-    version="1.0.0",
-    url="https://github.com/sileht/pycradox",
+    version="1.0.1",
+    license="LGPL 2.1",
     author="Mehdi Abaakouk",
     author_email="sileht@sileht.net",
-    maintainer="Mehdi Abaakouk",
-    maintainer_email="sileht@sileht.net",
-    description=("Python libraries for the Ceph librados library with use "
-                 "cython instead of ctypes"),
-    long_description="""This package contains Python libraries for interacting
-with Ceph's rados library.
-
-It requires at 0.94.X (hammer) release to compile.
-""",
+    classifiers=("Intended Audience :: Information Technology",
+                 "Intended Audience :: System Administrators",
+                 "License :: OSI Approved :: GNU Lesser General "
+                 "Public License v2 (LGPLv2)",
+                 "Operating System :: POSIX :: Linux",
+                 "Programming Language :: Python",
+                 "Programming Language :: Python :: 2",
+                 "Programming Language :: Python :: 2.7",
+                 "Programming Language :: Python :: 3",
+                 "Programming Language :: Python :: 3.4"),
+    url="https://github.com/sileht/pycradox",
+    description=("Python libraries for the Ceph librados library with "
+                 "use cython instead of ctypes"),
+    long_description=description,
     ext_modules=cythonize(
         [Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
         build_dir=os.environ.get("CYTHON_BUILD_DIR", None),
