@@ -34,6 +34,11 @@ def test_ioctx_context_manager():
         with conn.open_ioctx('rbd') as ioctx:
             pass
 
+def test_parse_argv():
+    args = ['osd', 'pool', 'delete', 'foobar', 'foobar', '--yes-i-really-really-mean-it']
+    r = Rados()
+    eq(args, r.conf_parse_argv(args))
+
 def test_parse_argv_empty_str():
     args = ['']
     r = Rados()

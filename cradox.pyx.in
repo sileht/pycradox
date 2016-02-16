@@ -467,6 +467,11 @@ def cstr(val, name, encoding="utf-8", opt=False):
     else:
         raise TypeError('%s must be a string' % name)
 
+
+def cstr_list(list_str, name, encoding="utf-8"):
+    return [cstr(s, name) for s in list_str]
+
+
 def decode_cstr(val, encoding="utf-8"):
     """
     Decode a byte string into a Python string.
@@ -499,16 +504,6 @@ cdef size_t * to_csize_t_array(list_int):
         raise MemoryError("malloc failed")
     for i in xrange(len(list_int)):
         ret[i] = <size_t>list_int[i]
-    return ret
-
-
-cdef char ** to_cstring_array(list_str, name):
-    cdef char **ret = <char **>malloc(len(list_str) * sizeof(char *))
-    if ret == NULL:
-        raise MemoryError("malloc failed")
-    for i in xrange(len(list_str)):
-        val = cstr(list_str[i], name)
-        ret[i] = <char *>val
     return ret
 
 
@@ -664,13 +659,14 @@ Rados object in state %s." % self.state)
         if not args:
             return
 
+        cargs = cstr_list(args, 'args')
         cdef:
             int _argc = len(args)
-            char **_argv = to_cstring_array(args, 'args')
+            char **_argv = to_bytes_array(cargs)
             char **_remargv = NULL
 
         try:
-            _remargv = <char **>realloc_chk(_remargv, _argc)
+            _remargv = <char **>malloc(_argc * sizeof(char *))
             with nogil:
                 ret = rados_conf_parse_argv_remainder(self.cluster, _argc,
                                                       <const char**>_argv,
@@ -681,7 +677,7 @@ Rados object in state %s." % self.state)
             # _remargv was allocated with fixed argc; collapse return
             # list to eliminate any missing args
             retargs = [decode_cstr(a) for a in _remargv[:_argc]
-                       if a is not None]
+                       if a != NULL]
             self.parsed_args = args
             return retargs
         finally:
@@ -1109,7 +1105,7 @@ Rados object in state %s." % self.state)
         # timeout argument, but we keep it for backward compat with old python binding
 
         self.require_state("connected")
-        cmd = [cstr(c, 'c') for c in cmd]
+        cmd = cstr_list(cmd, 'c')
 
         if isinstance(target, int):
         # NOTE(sileht): looks weird but test_monmap_dump pass int
@@ -1120,7 +1116,7 @@ Rados object in state %s." % self.state)
 
         cdef:
             char *_target = opt_str(target)
-            char **_cmd = to_cstring_array(cmd, 'cmd')
+            char **_cmd = to_bytes_array(cmd)
             size_t _cmdlen = len(cmd)
 
             char *_inbuf = inbuf
@@ -1166,12 +1162,12 @@ Rados object in state %s." % self.state)
         # timeout argument, but we keep it for backward compat with old python binding
         self.require_state("connected")
 
-        cmd = [cstr(c, 'c') for c in cmd]
+        cmd = cstr_list(cmd, 'cmd')
         inbuf = cstr(inbuf, 'inbuf')
 
         cdef:
             int _osdid = osdid
-            char **_cmd = to_cstring_array(cmd, 'cmd')
+            char **_cmd = to_bytes_array(cmd)
             size_t _cmdlen = len(cmd)
 
             char *_inbuf = inbuf
@@ -1210,12 +1206,12 @@ Rados object in state %s." % self.state)
         self.require_state("connected")
 
         pgid = cstr(pgid, 'pgid')
-        cmd = [cstr(c, 'c') for c in cmd]
+        cmd = cstr_list(cmd, 'cmd')
         inbuf = cstr(inbuf, 'inbuf')
 
         cdef:
             char *_pgid = pgid
-            char **_cmd = to_cstring_array(cmd, 'cmd')
+            char **_cmd = to_bytes_array(cmd)
             size_t _cmdlen = len(cmd)
 
             char *_inbuf = inbuf
@@ -2777,10 +2773,11 @@ returned %d, but should return zero on success." % (self.name, ret))
         if len(keys) != len(values):
             raise Error("Rados(): keys and values must have the same number of items")
 
+        keys = cstr_list(keys, 'keys')
         cdef:
             WriteOp _write_op = write_op
             size_t key_num = len(keys)
-            char **_keys = to_cstring_array(keys, 'keys')
+            char **_keys = to_bytes_array(keys)
             char **_values = to_bytes_array(values)
             size_t *_lens = to_csize_t_array([len(v) for v in values])
 
@@ -2908,10 +2905,11 @@ returned %d, but should return zero on success." % (self.name, ret))
         :type keys: tuple
         :returns: an iterator over the the requested omap values, return value from this action
         """
+        keys = cstr_list(keys, 'keys')
         cdef:
             ReadOp _read_op = read_op
             rados_omap_iter_t iter_addr
-            char **_keys = to_cstring_array(keys, 'keys')
+            char **_keys = to_bytes_array(keys)
             size_t key_num = len(keys)
             int prval
 
@@ -2936,10 +2934,11 @@ returned %d, but should return zero on success." % (self.name, ret))
         :type keys: tuple
         """
 
+        keys = cstr_list(keys, 'keys')
         cdef:
             WriteOp _write_op = write_op
             size_t key_num = len(keys)
-            char **_keys = to_cstring_array(keys, 'keys')
+            char **_keys = to_bytes_array(keys)
 
         try:
             with nogil:
