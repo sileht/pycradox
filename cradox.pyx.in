@@ -291,7 +291,6 @@ LIBRADOS_ALL_NSPACES = _LIBRADOS_ALL_NSPACES.decode('utf-8')
 ANONYMOUS_AUID = 0xffffffffffffffff
 ADMIN_AUID = 0
 
-
 class Error(Exception):
     """ `Error` class, derived from `Exception` """
 
@@ -543,18 +542,8 @@ class Version(object):
 
 
 cdef class Rados(object):
-    """
-    This class wraps librados functions
-    """
-
-    cdef:
-        rados_t cluster
-        public object state
-        public object monitor_callbacks
-        public object parsed_args
-        public object conf_defaults
-        public object conffile
-        public object rados_id
+    """This class wraps librados functions"""
+    # NOTE(sileht): attributes declared in .pyd
 
     def __init__(self, *args, **kwargs):
         PyEval_InitThreads()
@@ -1755,20 +1744,7 @@ cdef int __aio_complete_cb(rados_completion_t completion, void *args) with gil:
 
 cdef class Ioctx(object):
     """rados.Ioctx object"""
-
-    cdef:
-        rados_ioctx_t io
-        public char *name
-        public char *state
-        public object locator_key
-        public object nspace
-
-        # TODO(sileht): we need to track leaving completion objects
-        # I guess we can do that in a lighter ways, but keep code simple
-        # as before for now
-        public object safe_completions
-        public object complete_completions
-        public object lock
+    # NOTE(sileht): attributes declared in .pyd
 
     def __init__(self, name):
         self.name = name
@@ -1798,7 +1774,7 @@ cdef class Ioctx(object):
             with self.lock:
                 self.safe_completions.append(completion_obj)
 
-    cdef __get_completion(self, oncomplete, onsafe):
+    def __get_completion(self, oncomplete, onsafe):
         """
         Constructs a completion to use with asynchronous operations
 

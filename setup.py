@@ -56,10 +56,13 @@ class EggInfoCommand(egg_info):
 if (len(sys.argv) >= 2 and
         any(i in sys.argv[1:] for i in ('--help', 'clean', 'egg_info',
                                         '--version', 'sdist'))):
-    def cythonize(x, **kwargs):
-        return x
+    ext_modules = []
 else:
     generate_pyx()
+    ext_modules = cythonize(
+        [Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
+        build_dir=os.environ.get("CYTHON_BUILD_DIR", None),
+        output_dir=os.environ.get("CYTHON_OUTPUT_DIR", None))
 
 
 with open(os.path.join(os.path.dirname(__file__), "README.rst")) as f:
@@ -85,10 +88,7 @@ setup(
     description=("Python libraries for the Ceph librados library with "
                  "use cython instead of ctypes"),
     long_description=description,
-    ext_modules=cythonize(
-        [Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
-        build_dir=os.environ.get("CYTHON_BUILD_DIR", None),
-        output_dir=os.environ.get("CYTHON_OUTPUT_DIR", None)),
+    ext_modules=ext_modules,
     cmdclass={
         "egg_info": EggInfoCommand,
     },
