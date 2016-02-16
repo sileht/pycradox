@@ -48,21 +48,30 @@ Or, if you have virtualenvwrapper installed::
 Usage
 -----
 
+::
+
   import cradox as rados
 
 
-Tests
------
+Functionnal Tests
+-----------------
 
-  For python 2.X:
+A running ceph cluster is needed, the authentification must be disabled or done
+automatically with the configuration in /etc/ceph/ceph.conf.
+
+For python 2.X::
+
   $ ./test_rados.sh
 
-  For python 3.X:
+For python 3.X::
+
   $ ./test_rados.sh -3
 
-  For python2-dbg + gdb
+For python2-dbg + gdb::
+
   $ ./test_rados.sh -b
 
-  For python2-dbg + cygdb
+For python2-dbg + cygdb::
+
   $ ./test_rados.sh -d
 
