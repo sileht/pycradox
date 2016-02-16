@@ -67,7 +67,7 @@ with open(os.path.join(os.path.dirname(__file__), "README.rst")) as f:
 
 setup(
     name='cradox',
-    version="1.0.1",
+    version="1.0.2",
     license="LGPL 2.1",
     author="Mehdi Abaakouk",
     author_email="sileht@sileht.net",
