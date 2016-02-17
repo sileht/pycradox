@@ -548,7 +548,7 @@ cdef class Rados(object):
               ('conffile', opt(str_type)))
     def __setup(self, rados_id=None, name=None, clustername=None,
                 conf_defaults=None, conffile=None, conf=None, flags=0):
-        self.monitor_callbacks = []
+        self.monitor_callback = None
         self.parsed_args = []
         self.conf_defaults = conf_defaults
         self.conffile = conffile
@@ -783,13 +783,13 @@ Rados object in state %s." % self.state)
         with nogil:
             ret = rados_ping_monitor(self.cluster, _mon_id, &outstr, &outstrlen)
 
-        my_outstr = decode_cstr(outstr)
-        if outstrlen:
-            rados_buffer_free(outstr)
-
         if ret != 0:
             raise make_ex(ret, "error calling ping_monitor")
-        return my_outstr
+
+        if outstrlen:
+            my_outstr = outstr[:outstrlen]
+            rados_buffer_free(outstr)
+            return decode_cstr(my_outstr)
 
     def connect(self, timeout=0):
         """
@@ -1273,22 +1273,28 @@ Rados object in state %s." % self.state)
     def monitor_log(self, level, callback, arg):
         if level not in MONITOR_LEVELS:
             raise LogicError("invalid monitor level " + level)
-        if not callable(callback):
-            raise LogicError("callback must be a callable function")
-
-        cb = (callback, arg)
+        if callback is not None and not callable(callback):
+            raise LogicError("callback must be a callable function or None")
 
         level = cstr(level, 'level')
-        cdef:
-            char *_level = level
-            PyObject* _arg = <PyObject*>cb
+        cdef char *_level = level
+
+        if callback is None:
+            with nogil:
+                r = rados_monitor_log(self.cluster, <const char*>_level, NULL, NULL)
+            self.monitor_callback = None
+            return
+
+        cb = (callback, arg)
+        cdef PyObject* _arg = <PyObject*>cb
         with nogil:
             r = rados_monitor_log(self.cluster, <const char*>_level,
                                   <rados_log_callback_t>&__monitor_callback, _arg)
+
         if r:
             raise make_ex(r, 'error calling rados_monitor_log')
         # NOTE(sileht): Prevents the callback method from being garbage collected
-        self.monitor_callbacks.append(cb)
+        self.monitor_callback = cb
 
 
 cdef class OmapIterator(object):

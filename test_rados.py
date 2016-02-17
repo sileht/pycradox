@@ -138,6 +138,14 @@ class TestRados(object):
     def tearDown(self):
         self.rados.shutdown()
 
+    def test_ping_monitor(self):
+        assert_raises(ObjectNotFound, self.rados.ping_monitor, 'not_exists_monitor')
+        cmd = {'prefix': 'mon dump', 'format':'json'}
+        ret, buf, out = self.rados.mon_command(json.dumps(cmd), b'')
+        for mon in json.loads(buf.decode('utf8'))['mons']:
+            buf = json.loads(self.rados.ping_monitor(mon['name']))
+            assert buf.get('health')
+
     def test_create(self):
         self.rados.create_pool('foo')
         self.rados.delete_pool('foo')
@@ -257,6 +265,8 @@ class TestRados(object):
         MonitorLog(self.rados, "debug", cb, "arg")
         with lock:
             lock.wait()
+        MonitorLog(self.rados, "debug", None, None)
+        eq(None, self.rados.monitor_callback)
 
 class TestIoctx(object):
 
