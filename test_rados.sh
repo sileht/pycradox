@@ -2,6 +2,12 @@
 
 set -e 
 
+cleanup(){
+    rm -f a.out test.gdb
+}
+
+trap cleanup EXIT
+
 if [ "$1" == "-d" ] ; then
 	cat > test.gdb <<EOF
 set pagination off
