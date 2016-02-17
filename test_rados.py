@@ -799,12 +799,12 @@ class TestCommand(object):
     def test_ceph_osd_pool_create_utf8(self):
         if _python2:
             # Use encoded bytestring
-            poolname = b"\351\273\204"
+            poolname = b"\351\273\205"
         else:
-            poolname = "\u9ec4"
+            poolname = "\u9ec5"
 
         cmd = {"prefix": "osd pool create", "pg_num": 16, "pool": poolname}
         ret, buf, out = self.rados.mon_command(json.dumps(cmd), b'')
         eq(ret, 0)
         assert len(out) > 0
-        eq(u"pool '\u9ec4' created", out)
+        eq(u"pool '\u9ec5' created", out)

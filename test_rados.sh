@@ -42,7 +42,7 @@ fi
 [ "$@" ] && tests=":$@"
 
 ceph osd unset noup
-for i in $(rados lspools | grep -e foo -e test_pool -e foo-cache -e 黄) ; do 
+for i in $(rados lspools | grep -e foo -e test_pool -e foo-cache -e 黄 -e 黅) ; do 
 	rados rmpool $i $i --yes-i-really-really-mean-it ; 
 done ; 
 
