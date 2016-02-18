@@ -3,6 +3,7 @@
 *.pyc
 tmp
 dist
+a.out
 *.egg-info
 cradox.pyx
 build
