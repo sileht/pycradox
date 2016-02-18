@@ -1395,7 +1395,7 @@ cdef class ObjectIterator(object):
         nspace = decode_cstr(nspace_) if nspace_ != NULL else None
         return Object(self.ioctx, key, locator, nspace)
 
-    def __del__(self):
+    def __dealloc__(self):
         with nogil:
 @@BEGIN_HAMMER_OR_LATER@@
             rados_nobjects_list_close(self.ctx)
