@@ -1303,7 +1303,7 @@ cdef class OmapIterator(object):
     cdef public Ioctx ioctx
     cdef rados_omap_iter_t ctx
 
-    def __init__(self, Ioctx ioctx):
+    def __cinit__(self, Ioctx ioctx):
         self.ioctx = ioctx
 
     def __iter__(self):
@@ -1335,7 +1335,7 @@ cdef class OmapIterator(object):
             val = val_[:len_]
         return (key, val)
 
-    def __del__(self):
+    def __dealloc__(self):
         with nogil:
             rados_omap_get_end(self.ctx)
 
