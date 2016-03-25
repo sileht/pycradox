@@ -2,17 +2,18 @@
 # https://blog.kevin-brown.com/programming/2014/09/24/combining-autotools-and-setuptools.html
 import os
 import os.path
-import sys
 
-from setuptools.command.egg_info import egg_info
-from distutils.core import setup
+from setuptools import Extension
+from setuptools import setup
 from distutils import ccompiler
-from distutils.extension import Extension
 
-VERSION="1.1.2"
+VERSION = "1.1.2"
 
 
-def generate_pyx(recent=None):
+def generate_extensions(recent=None):
+    from Cython.Build import cythonize
+
+    # Check librados2 requirements
     if recent is None:
         comp = ccompiler.new_compiler(force=True, verbose=True)
         rados_installed = comp.has_function('rados_connect',
@@ -21,6 +22,8 @@ def generate_pyx(recent=None):
             raise Exception("librados2 and/or librados-dev are missing")
         recent = comp.has_function('rados_pool_get_base_tier',
                                    libraries=['rados'])
+
+    # Generate the source file from template
     cradox_out = os.path.join(os.path.dirname(__file__), 'cradox.pyx')
     cradox_in = "%s.in" % cradox_out
     with open(cradox_in, 'r') as src:
@@ -44,31 +47,34 @@ def generate_pyx(recent=None):
                 else:
                     dst.write(line)
 
+    # Return cythonized extension
+    return cythonize(
+        [Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
+        build_dir=os.environ.get("CYTHON_BUILD_DIR", None),
+        output_dir=os.environ.get("CYTHON_OUTPUT_DIR", None))
 
-class EggInfoCommand(egg_info):
-    def finalize_options(self):
-        egg_info.finalize_options(self)
-        if "build" in self.distribution.command_obj:
-            build_command = self.distribution.command_obj["build"]
-            self.egg_base = build_command.build_base
-            self.egg_info = os.path.join(self.egg_base,
-                                         os.path.basename(self.egg_info))
+
+class lazy_cythonize(list):
+    def __init__(self, callback):
+        self._list, self.callback = None, callback
+
+    def c_list(self):
+        if self._list is None:
+            self._list = self.callback()
+        return self._list
+
+    def __iter__(self):
+        for e in self.c_list():
+            yield e
+
+    def __getitem__(self, ii):
+        return self.c_list()[ii]
+
+    def __len__(self):
+        return len(self.c_list())
 
 
 if __name__ == '__main__':
-    # Disable cythonification if we're not really building anything
-    if (len(sys.argv) >= 2 and
-            any(i in sys.argv[1:] for i in ('--help', 'clean', 'egg_info',
-                                            '--version', 'sdist'))):
-        ext_modules = []
-    else:
-        from Cython.Build import cythonize
-        generate_pyx()
-        ext_modules = cythonize(
-            [Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
-            build_dir=os.environ.get("CYTHON_BUILD_DIR", None),
-            output_dir=os.environ.get("CYTHON_OUTPUT_DIR", None))
-
     with open(os.path.join(os.path.dirname(__file__), "README.rst")) as f:
         description = f.read()
 
@@ -79,22 +85,19 @@ if __name__ == '__main__':
         author="Mehdi Abaakouk",
         author_email="sileht@sileht.net",
         classifiers=("Intended Audience :: Information Technology",
-                    "Intended Audience :: System Administrators",
-                    "License :: OSI Approved :: GNU Lesser General "
-                    "Public License v2 (LGPLv2)",
-                    "Operating System :: POSIX :: Linux",
-                    "Programming Language :: Python",
-                    "Programming Language :: Python :: 2",
-                    "Programming Language :: Python :: 2.7",
-                    "Programming Language :: Python :: 3",
-                    "Programming Language :: Python :: 3.4"),
+                     "Intended Audience :: System Administrators",
+                     "License :: OSI Approved :: GNU Lesser General "
+                     "Public License v2 (LGPLv2)",
+                     "Operating System :: POSIX :: Linux",
+                     "Programming Language :: Python",
+                     "Programming Language :: Python :: 2",
+                     "Programming Language :: Python :: 2.7",
+                     "Programming Language :: Python :: 3",
+                     "Programming Language :: Python :: 3.4"),
         url="https://github.com/sileht/pycradox",
         description=("Python libraries for the Ceph librados library with "
-                    "use cython instead of ctypes"),
+                     "use cython instead of ctypes"),
         long_description=description,
-        install_requires=["Cython"],  # Only required for build
-        ext_modules=ext_modules,
-        cmdclass={
-            "egg_info": EggInfoCommand,
-        },
+        setup_requires=["Cython"],
+        ext_modules=lazy_cythonize(generate_extensions),
     )
