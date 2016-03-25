@@ -10,7 +10,7 @@ from distutils import ccompiler
 from distutils.extension import Extension
 from Cython.Build import cythonize
 
-VERSION="1.0.9"
+VERSION="1.1.0"
 
 
 def generate_pyx(recent=None):
