@@ -1,0 +1,4 @@
+exclude *.c
+exclude push_in_ceph_tree.sh
+exclude release.sh
+exclude cradox.pyx

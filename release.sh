@@ -3,7 +3,7 @@
 set -e
 set -x
 
-version=$(python setup.py --version)
+version=$(python setup.py --version | sed 's/\.dev.*//')
 
 status=$(git status -sz)
 [ -z "$status" ] || false
@@ -12,6 +12,7 @@ git push
 git tag -s $version -m "Release version ${version}"
 git checkout $version
 git clean -fdx
+python setup.py --version
 python setup.py sdist
 
 set +x
