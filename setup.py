@@ -8,9 +8,8 @@ from setuptools.command.egg_info import egg_info
 from distutils.core import setup
 from distutils import ccompiler
 from distutils.extension import Extension
-from Cython.Build import cythonize
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 
 
 def generate_pyx(recent=None):
@@ -63,6 +62,7 @@ if __name__ == '__main__':
                                             '--version', 'sdist'))):
         ext_modules = []
     else:
+        from Cython.Build import cythonize
         generate_pyx()
         ext_modules = cythonize(
             [Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
@@ -92,6 +92,7 @@ if __name__ == '__main__':
         description=("Python libraries for the Ceph librados library with "
                     "use cython instead of ctypes"),
         long_description=description,
+        install_requires=["Cython"],  # Only required for build
         ext_modules=ext_modules,
         cmdclass={
             "egg_info": EggInfoCommand,
