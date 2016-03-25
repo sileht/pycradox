@@ -13,16 +13,16 @@ cradox
 
 Python libraries for the Ceph librados library with use cython instead of ctypes
 
-This a standalone library identical to this Ceph PR https://github.com/ceph/ceph/pull/7621
+This a standalone library initially comes from this Ceph PR https://github.com/ceph/ceph/pull/7621
 
-But this can be used with older version of Ceph from 0.80.X (firefly) to 10.0.X (perhaps more not tested)
+But can be built against with older version of Ceph from 0.80.X (firefly) to 10.1.X (perhaps more not tested)
 
-This is designed for application that only want to use the Rados API, this can’t be used with the
-ceph rbd.py or librbdpy
+This is designed for application that want to use a recent python-rados API without upgrading
+the whole ceph cluster.
 
-The API of this python lib is identical to the Ceph rados.py API. More detail can be found on
-https://github.com/ceph/ceph/pull/7621.
+Rados C handles provided by this library can’t be used with the ceph rbd.py or librbdpy.
 
+The API of this python lib will be keep in sync with the upstream Ceph rados.py API.
 
 * Free software: LGPL 2.1
 * Documentation: http://docs.ceph.com/docs/master/rados/api/python/
