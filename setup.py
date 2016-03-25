@@ -7,7 +7,7 @@ from setuptools import Extension
 from setuptools import setup
 from distutils import ccompiler
 
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 
 
 def generate_extensions(recent=None):
