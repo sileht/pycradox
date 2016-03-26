@@ -561,10 +561,11 @@ cdef class Rados(object):
         elif name is None:
             name = 'client.admin'
         if clustername is None:
-            # NOTE(sileht): since 10.2, the default here is '' and set
-            # ceph by librados itself, but we continue to it to 'ceph'
-            # here to keep backward compat.
+{% if version >= "jewel" %}
+            clustername = ''
+{% else %}
             clustername = 'ceph'
+{% endif %}
 
         name = cstr(name, 'name')
         clustername = cstr(clustername, 'clustername')
