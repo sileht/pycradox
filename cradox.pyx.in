@@ -57,14 +57,14 @@ cdef extern from "sys/time.h":
         suseconds_t tv_usec
 
 
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
 cdef extern from "rados/rados_types.h" nogil:
     cdef char* _LIBRADOS_ALL_NSPACES "LIBRADOS_ALL_NSPACES"
-@@END_HAMMER_OR_LATER@@
+{% endif %}
 
 
 cdef extern from "rados/librados.h" nogil:
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
     enum:
         _LIBRADOS_OP_FLAG_EXCL "LIBRADOS_OP_FLAG_EXCL"
         _LIBRADOS_OP_FLAG_FAILOK "LIBRADOS_OP_FLAG_FAILOK"
@@ -73,7 +73,7 @@ cdef extern from "rados/librados.h" nogil:
         _LIBRADOS_OP_FLAG_FADVISE_WILLNEED "LIBRADOS_OP_FLAG_FADVISE_WILLNEED"
         _LIBRADOS_OP_FLAG_FADVISE_DONTNEED "LIBRADOS_OP_FLAG_FADVISE_DONTNEED"
         _LIBRADOS_OP_FLAG_FADVISE_NOCACHE "LIBRADOS_OP_FLAG_FADVISE_NOCACHE"
-@@END_HAMMER_OR_LATER@@
+{% endif %}
 
 
     enum:
@@ -142,20 +142,20 @@ cdef extern from "rados/librados.h" nogil:
     int rados_pool_create_with_auid(rados_t cluster, const char *pool_name, uint64_t auid)
     int rados_pool_create_with_crush_rule(rados_t cluster, const char *pool_name, uint8_t crush_rule_num)
     int rados_pool_create_with_all(rados_t cluster, const char *pool_name, uint64_t auid, uint8_t crush_rule_num)
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
     int rados_pool_get_base_tier(rados_t cluster, int64_t pool, int64_t *base_tier)
-@@END_HAMMER_OR_LATER@@
+{% endif %}
     int rados_pool_list(rados_t cluster, char *buf, size_t len)
     int rados_pool_delete(rados_t cluster, const char *pool_name)
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "jewel" %}
     int rados_inconsistent_pg_list(rados_t cluster, int64_t pool, char *buf, size_t len)
-@@END_HAMMER_OR_LATER@@
+{% endif %}
 
     int rados_cluster_stat(rados_t cluster, rados_cluster_stat_t *result)
     int rados_cluster_fsid(rados_t cluster, char *buf, size_t len)
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
     int rados_blacklist_add(rados_t cluster, char *client_address, uint32_t expire_seconds)
-@@END_HAMMER_OR_LATER@@
+{% endif %}
 
     int rados_ping_monitor(rados_t cluster, const char *mon_id, char **outstr, size_t *outstrlen)
     int rados_mon_command(rados_t cluster, const char **cmd, size_t cmdlen,
@@ -199,16 +199,15 @@ cdef extern from "rados/librados.h" nogil:
     int rados_getxattrs_next(rados_xattrs_iter_t iter, const char **name, const char **val, size_t *len)
     void rados_getxattrs_end(rados_xattrs_iter_t iter)
 
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
     int rados_nobjects_list_open(rados_ioctx_t io, rados_list_ctx_t *ctx)
     int rados_nobjects_list_next(rados_list_ctx_t ctx, const char **entry, const char **key, const char **nspace)
     void rados_nobjects_list_close(rados_list_ctx_t ctx)
-@@END_HAMMER_OR_LATER@@
-@@BEGIN_BEFORE_HAMMER@@
+{% else %}
     int rados_objects_list_open(rados_ioctx_t io, rados_list_ctx_t *ctx)
     int rados_objects_list_next(rados_list_ctx_t ctx, const char **entry, const char **key)
     void rados_objects_list_close(rados_list_ctx_t ctx)
-@@END_BEFORE_HAMMER@@
+{% endif %}
 
     int rados_ioctx_snap_rollback(rados_ioctx_t io, const char * oid, const char * snapname)
     int rados_ioctx_snap_create(rados_ioctx_t io, const char * snapname)
@@ -265,7 +264,7 @@ cdef extern from "rados/librados.h" nogil:
     void rados_omap_get_end(rados_omap_iter_t iter)
 
 
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
 LIBRADOS_OP_FLAG_EXCL = _LIBRADOS_OP_FLAG_EXCL
 LIBRADOS_OP_FLAG_FAILOK = _LIBRADOS_OP_FLAG_FAILOK
 LIBRADOS_OP_FLAG_FADVISE_RANDOM = _LIBRADOS_OP_FLAG_FADVISE_RANDOM
@@ -273,7 +272,7 @@ LIBRADOS_OP_FLAG_FADVISE_SEQUENTIAL = _LIBRADOS_OP_FLAG_FADVISE_SEQUENTIAL
 LIBRADOS_OP_FLAG_FADVISE_WILLNEED = _LIBRADOS_OP_FLAG_FADVISE_WILLNEED
 LIBRADOS_OP_FLAG_FADVISE_DONTNEED = _LIBRADOS_OP_FLAG_FADVISE_DONTNEED
 LIBRADOS_OP_FLAG_FADVISE_NOCACHE = _LIBRADOS_OP_FLAG_FADVISE_NOCACHE
-@@END_HAMMER_OR_LATER@@
+{% endif %}
 
 LIBRADOS_SNAP_HEAD = _LIBRADOS_SNAP_HEAD
 
@@ -285,9 +284,9 @@ LIBRADOS_OPERATION_IGNORE_CACHE = _LIBRADOS_OPERATION_IGNORE_CACHE
 LIBRADOS_OPERATION_SKIPRWLOCKS = _LIBRADOS_OPERATION_SKIPRWLOCKS
 LIBRADOS_OPERATION_IGNORE_OVERLAY = _LIBRADOS_OPERATION_IGNORE_OVERLAY
 
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
 LIBRADOS_ALL_NSPACES = _LIBRADOS_ALL_NSPACES.decode('utf-8')
-@@END_HAMMER_OR_LATER@@
+{% endif %}
 
 ANONYMOUS_AUID = 0xffffffffffffffff
 ADMIN_AUID = 0
@@ -974,7 +973,7 @@ Rados object in state %s." % self.state)
         if ret < 0:
             raise make_ex(ret, "error creating pool '%s'" % pool_name)
 
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
     @requires(('pool_id', int))
     def get_pool_base_tier(self, pool_id):
         """
@@ -992,7 +991,7 @@ Rados object in state %s." % self.state)
         if ret < 0:
             raise make_ex(ret, "get_pool_base_tier(%d)" % pool_id)
         return int(base_tier)
-@@END_HAMMER_OR_LATER@@
+{% endif %}
 
     @requires(('pool_name', str_type))
     def delete_pool(self, pool_name):
@@ -1018,7 +1017,7 @@ Rados object in state %s." % self.state)
         if ret < 0:
             raise make_ex(ret, "error deleting pool '%s'" % pool_name)
 
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "jewel" %}
     @requires(('pool_id', int))
     def get_inconsistent_pgs(self, pool_id):
         """
@@ -1050,7 +1049,7 @@ Rados object in state %s." % self.state)
         finally:
             free(pgs)
 
-@@END_HAMMER_OR_LATER@@
+{% endif %}
     def list_pools(self):
         """
         Gets a list of pool names.
@@ -1283,7 +1282,7 @@ Rados object in state %s." % self.state)
             ret = rados_wait_for_latest_osdmap(self.cluster)
         return ret
 
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
     def blacklist_add(self, client_address, expire_seconds=0):
         """
         Blacklist a client from the OSDs
@@ -1305,7 +1304,7 @@ Rados object in state %s." % self.state)
             ret = rados_blacklist_add(self.cluster, _client_address, _expire_seconds)
         if ret < 0:
             raise make_ex(ret, "error blacklisting client '%s'" % client_address)
-@@END_HAMMER_OR_LATER@@
+{% endif %}
 
     def monitor_log(self, level, callback, arg):
         if level not in MONITOR_LEVELS:
@@ -1385,12 +1384,11 @@ cdef class ObjectIterator(object):
         self.ioctx = ioctx
 
         with nogil:
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
             ret = rados_nobjects_list_open(ioctx.io, &self.ctx)
-@@END_HAMMER_OR_LATER@@
-@@BEGIN_BEFORE_HAMMER@@
+{% else %}
             ret = rados_objects_list_open(ioctx.io, &self.ctx)
-@@END_BEFORE_HAMMER@@
+{% endif %}
         if ret < 0:
             raise make_ex(ret, "error iterating over the objects in ioctx '%s'"
                           % self.ioctx.name)
@@ -1411,12 +1409,11 @@ cdef class ObjectIterator(object):
             const char *nspace_ = NULL
 
         with nogil:
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
             ret = rados_nobjects_list_next(self.ctx, &key_, &locator_, &nspace_)
-@@END_HAMMER_OR_LATER@@
-@@BEGIN_BEFORE_HAMMER@@
+{% else %}
             ret = rados_objects_list_next(self.ctx, &key_, &locator_)
-@@END_BEFORE_HAMMER@@
+{% endif %}
 
         if ret < 0:
             raise StopIteration()
@@ -1428,12 +1425,11 @@ cdef class ObjectIterator(object):
 
     def __dealloc__(self):
         with nogil:
-@@BEGIN_HAMMER_OR_LATER@@
+{% if version >= "hammer" %}
             rados_nobjects_list_close(self.ctx)
-@@END_HAMMER_OR_LATER@@
-@@BEGIN_BEFORE_HAMMER@@
+{% else %}
             rados_objects_list_close(self.ctx)
-@@END_BEFORE_HAMMER@@
+{% endif %}
 
 
 cdef class XattrIterator(object):

@@ -3,6 +3,7 @@
 #
 
 import contextlib
+import collections
 import os
 import os.path
 import sys
@@ -26,51 +27,45 @@ def output_redirected():
     null.close()
 
 
-def pre_build_ext(cmd_obj, recent=None):
-    # Check librados2 requirements
-    if recent is None:
-        comp = ccompiler.new_compiler(force=True, verbose=True)
-        with output_redirected():
-            rados_installed = comp.has_function('rados_connect',
-                                                libraries=['rados'])
-        if not rados_installed:
-            raise Exception("librados2 or librados-dev >= 0.80 are missing")
-        with output_redirected():
-            recent = comp.has_function('rados_pool_get_base_tier',
-                                       libraries=['rados'])
+ceph_version_map = collections.OrderedDict(sorted({
+    "firefly": "rados_connect",
+    "hammer": "rados_pool_get_base_tier",
+    "jewel": "rados_inconsistent_pg_list",
+}.items(), key=lambda t: t[0]))
 
-    print("librados %s 0.94 detected (method rados_pool_get_base_tier %s)" %
-          (">=" if recent else "<=",
-           "detected" if recent else "absent"))
+
+def pre_build_ext(cmd_obj, version=None):
+    if version == "latest":
+        version = sorted(ceph_version_map.keys())[-1]
+    elif version is None:
+        comp = ccompiler.new_compiler(force=True, verbose=True)
+        for potential_version, method in ceph_version_map.items():
+            print("looking for librados >= %s (with %s)" %
+                  (potential_version, method))
+            with output_redirected():
+                if comp.has_function(method, libraries=['rados']):
+                    version = potential_version
+                else:
+                    break
+
+        if not version:
+            raise Exception("librados2 or librados-dev >= 0.80 are missing")
+
+    print("librados %s found" % version)
 
     # Generate the source file from template
+    from jinja2 import Template
     cradox_out = os.path.join(os.path.dirname(__file__), 'cradox.pyx')
     cradox_in = "%s.in" % cradox_out
     with open(cradox_in, 'r') as src:
         with open(cradox_out, 'w') as dst:
-            skip = False
-            for line in src:
-                if line == "@@BEGIN_BEFORE_HAMMER@@\n":
-                    skip = recent
-                    continue
-                elif line == "@@END_BEFORE_HAMMER@@\n":
-                    skip = False
-                    continue
-                elif line == "@@BEGIN_HAMMER_OR_LATER@@\n":
-                    skip = not recent
-                    continue
-                elif line == "@@END_HAMMER_OR_LATER@@\n":
-                    skip = False
-                    continue
-                elif skip:
-                    continue
-                else:
-                    dst.write(line)
+            template = Template(src.read())
+            dst.write(template.render(version=version))
 
 
 if __name__ == '__main__':
     setup(
-        setup_requires=['pbr', 'Cython'],
+        setup_requires=['pbr', 'Cython', 'Jinja2'],
         pbr=True,
         ext_modules=[Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
     )
