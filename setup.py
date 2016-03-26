@@ -40,18 +40,22 @@ def pre_build_ext(cmd_obj, version=None):
     elif version is None:
         comp = ccompiler.new_compiler(force=True, verbose=True)
         for potential_version, method in ceph_version_map.items():
-            print("looking for librados >= %s (with %s)" %
-                  (potential_version, method))
+            sys.stdout.write("looking for librados >= %s (with %s)" %
+                             (potential_version, method))
+            sys.stdout.flush()
             with output_redirected():
-                if comp.has_function(method, libraries=['rados']):
-                    version = potential_version
-                else:
-                    break
+                found = comp.has_function(method, libraries=['rados'])
+            if found:
+                version = potential_version
+                print(", FOUND")
+            else:
+                print(", NOT FOUND")
+                break
 
         if not version:
             raise Exception("librados2 or librados-dev >= 0.80 are missing")
 
-    print("librados %s found" % version)
+    print("building cradox with %s api compatibility" % version)
 
     # Generate the source file from template
     from jinja2 import Template
