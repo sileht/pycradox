@@ -2,6 +2,9 @@
 cradox
 ======
 
+.. image:: https://travis-ci.org/sileht/pycradox.png?branch=master
+   :target: https://travis-ci.org/sileht/pycradox
+
 .. image:: https://img.shields.io/pypi/v/cradox.svg
    :target: https://pypi.python.org/pypi/cradox/
    :alt: Latest Version
@@ -61,17 +64,17 @@ automatically with the configuration in /etc/ceph/ceph.conf.
 
 For python 2.X::
 
-  $ ./test_rados.sh
+  $ ./run_tests.sh
 
 For python 3.X::
 
-  $ ./test_rados.sh -3
+  $ ./run_tests.sh -3
 
 For python2-dbg + gdb::
 
-  $ ./test_rados.sh -b
+  $ ./run_tests.sh -b
 
 For python2-dbg + cygdb::
 
-  $ ./test_rados.sh -d
+  $ ./run_tests.sh -d
 

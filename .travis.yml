@@ -1,0 +1,35 @@
+sudo: required
+dist: trusty
+language: python
+cache: pip
+python:
+    - 2.7
+    - 3.4
+env:
+    - CEPH=firefly
+    - CEPH=hammer
+    - CEPH=infernalis
+    - CEPH=jewel
+before_install:
+    - curl 'https://git.ceph.com/git/?p=ceph.git;a=blob_plain;f=keys/release.asc' | sudo apt-key add -
+    - echo deb http://download.ceph.com/debian-$CEPH/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
+    - sudo apt-get update -yqq
+    - sudo apt-get install -yqq librados-dev
+install:
+    - pip install -v . --log install.log
+    - pip install Jinja2
+    - python -c "import setup; setup.pre_build_ext(None)" > gen.log
+before_script: 
+    - '[ "$CEPH" == "infernalis" ] && CEPH=hammer || true'
+    - grep "building cradox with $CEPH api compatibility" install.log
+    - grep "building cradox with $CEPH api compatibility" gen.log
+    - VENV=$VIRTUAL_ENV
+    - deactivate
+    - git clone --depth=1 https://github.com/sileht/devstack.git -b sileht/master
+    - cp local.conf devstack/
+    - cd devstack
+    - PATH=/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin ./stack.sh
+    - cd -
+    - source $VENV/bin/activate
+script:
+    - nosetests -vds test_rados
