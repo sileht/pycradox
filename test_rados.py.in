@@ -631,6 +631,11 @@ class TestIoctx(object):
         r, _, _ = self.rados.mon_command(json.dumps(cmd), b'')
         eq(r, 0)
 
+{#
+ NOTE(sileht): ceph osd down doesn't work well on <= hammer
+ so we disable that event that reduces a bit the aio_read tests.
+#}
+{% if version >= "hammer" %}
     def test_aio_read(self):
         # this is a list so that the local cb() can modify it
         retval = [None]
@@ -700,6 +705,27 @@ class TestIoctx(object):
         eq(sys.getrefcount(comp), 2)
 
         [i.remove() for i in self.ioctx.list_objects()]
+
+{% else %}
+    def test_aio_read(self):
+        # this is a list so that the local cb() can modify it
+        retval = [None]
+        lock = threading.Condition()
+        def cb(_, buf):
+            with lock:
+                retval[0] = buf
+                lock.notify()
+        payload = b"bar\000frob"
+        self.ioctx.write("foo", payload)
+
+        comp = self.ioctx.aio_read("foo", len(payload), 0, cb)
+        time.sleep(3)
+        eq(True, comp.is_complete())
+        eq(retval[0], payload)
+        eq(sys.getrefcount(comp), 2)
+
+        [i.remove() for i in self.ioctx.list_objects()]
+{% endif %}
 
     def test_lock(self):
         self.ioctx.lock_exclusive("foo", "lock", "locker", "desc_lock",
