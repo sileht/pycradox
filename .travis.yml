@@ -30,6 +30,13 @@ before_script:
     - cd devstack
     - PATH=/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin ./stack.sh
     - cd -
+    - echo 'osd pool default size = 1' | sudo tee -a /etc/ceph/ceph.conf
+    - echo 'osd pool default min size = 1' | sudo tee -a /etc/ceph/ceph.conf
+    - sudo sed -i 's/cephx/none/g' /etc/ceph/ceph.conf
+    - sudo restart ceph-mon id=$(hostname -s)
+    - sudo restart ceph-osd id=0
+    - sleep 3
+    - 'while [ "$(ceph health)" != "HEALTH_OK" ]; do ceph health ;  sleep 1 ; done'
     - source $VENV/bin/activate
 script:
     - nosetests -vds test_rados
