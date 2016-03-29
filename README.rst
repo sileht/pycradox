@@ -59,22 +59,9 @@ Usage
 Functionnal Tests
 -----------------
 
-A running ceph cluster is needed, the authentification must be disabled or done
-automatically with the configuration in /etc/ceph/ceph.conf.
+Ceph packages must be installed, the suite create a temporary Ceph
+cluster run the tests and destroy it.
 
-For python 2.X::
+::
 
-  $ ./run_tests.sh
-
-For python 3.X::
-
-  $ ./run_tests.sh -3
-
-For python2-dbg + gdb::
-
-  $ ./run_tests.sh -b
-
-For python2-dbg + cygdb::
-
-  $ ./run_tests.sh -d
-
+    tox

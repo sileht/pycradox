@@ -9,37 +9,15 @@ python:
     - 2.7
     - 3.4
 env:
-    - CEPH=firefly
-    - CEPH=hammer
-    - CEPH=infernalis
-    - CEPH=jewel
+    - CEPH_RELEASE=firefly
+    - CEPH_RELEASE=hammer
+    - CEPH_RELEASE=infernalis
+    - CEPH_RELEASE=jewel
 before_install:
     - curl 'https://git.ceph.com/git/?p=ceph.git;a=blob_plain;f=keys/release.asc' | sudo apt-key add -
-    - echo deb http://download.ceph.com/debian-$CEPH/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
+    - echo deb http://download.ceph.com/debian-$CEPH_RELEASE/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
     - sudo apt-get update -yqq
-    - sudo apt-get install -yqq librados-dev
-install:
-    - pip install -v . --log install.log
-    - pip install Jinja2
-    - python -c "import setup; setup.pre_build_ext(None)" > gen.log
-before_script: 
-    - '[ "$CEPH" == "infernalis" ] && CEPH=hammer || true'
-    - grep "building cradox with $CEPH api compatibility" install.log
-    - grep "building cradox with $CEPH api compatibility" gen.log
-    - VENV=$VIRTUAL_ENV
-    - deactivate
-    - git clone --depth=1 https://github.com/sileht/devstack.git -b sileht/master
-    - cp local.conf devstack/
-    - cd devstack
-    - PATH=/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin ./stack.sh
-    - cd -
-    - echo 'osd pool default size = 1' | sudo tee -a /etc/ceph/ceph.conf
-    - echo 'osd pool default min size = 1' | sudo tee -a /etc/ceph/ceph.conf
-    - sudo sed -i 's/cephx/none/g' /etc/ceph/ceph.conf
-    - sudo restart ceph-mon id=$(hostname -s)
-    - sudo restart ceph-osd id=0
-    - sleep 3
-    - 'while [ "$(ceph health)" != "HEALTH_OK" ]; do ceph health ;  sleep 1 ; done'
-    - source $VENV/bin/activate
-script:
-    - nosetests -vds test_rados
+    - sudo apt-get install -yqq librados-dev ceph
+install: pip install tox-travis
+before_script: '[ "$CEPH_RELEASE" == "infernalis" ] && CEPH_RELEASE=hammer || true'
+script: tox -v
