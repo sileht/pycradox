@@ -16,8 +16,8 @@ env:
 before_install:
     - curl 'https://git.ceph.com/git/?p=ceph.git;a=blob_plain;f=keys/release.asc' | sudo apt-key add -
     - echo deb http://download.ceph.com/debian-$CEPH_RELEASE/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
-    - sudo apt-get update -yqq
-    - sudo apt-get install -yqq librados-dev ceph
+    - sudo apt-get update -yq
+    - sudo apt-get install -yq librados-dev ceph
 install: pip install tox-travis
 before_script: '[ "$CEPH_RELEASE" == "infernalis" ] && CEPH_RELEASE=hammer || true'
 script: tox -v
