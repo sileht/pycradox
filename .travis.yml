@@ -4,7 +4,9 @@ branches:
 sudo: required
 dist: trusty
 language: python
-cache: pip
+cache: 
+ - apt
+ - pip
 python:
     - 2.7
     - 3.4
@@ -18,6 +20,8 @@ before_install:
     - echo deb http://download.ceph.com/debian-$CEPH_RELEASE/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
     - sudo apt-get update -yq
     - sudo apt-get install -yq librados-dev ceph
-install: pip install tox-travis
+install:
+    # The install requirements in travis virtualenv that will be cached
+    - pip install tox-travis cython pbr -r test-requirements.txt
 before_script: '[ "$CEPH_RELEASE" == "infernalis" ] && CEPH_RELEASE=hammer || true'
 script: tox -v
