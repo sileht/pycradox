@@ -10,3 +10,4 @@ a.out
 cradox.pyx
 build
 cython_debug
+.tox
