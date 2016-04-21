@@ -23,7 +23,7 @@ But can be built against older version of Ceph from 0.80.X (firefly) to 10.1.X (
 This is designed for application that want to use a recent python-rados API without upgrading
 the whole ceph cluster.
 
-Rados C handles provided by this library can’t be used with the ceph rbd.py or librbdpy.
+Rados C handles provided by this library can't be used with the ceph rbd.py or librbdpy.
 
 The API of this python lib will be keep in sync with the upstream Ceph rados.py API.
 
