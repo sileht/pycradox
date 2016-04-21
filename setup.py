@@ -2,29 +2,13 @@
 #
 #
 
-import contextlib
 import collections
 import os
 import os.path
-import sys
 
-
+from distutils import ccompiler
 from setuptools import Extension
 from setuptools import setup
-from distutils import ccompiler
-
-
-@contextlib.contextmanager
-def output_redirected():
-    oldstderr = os.dup(sys.stderr.fileno())
-    oldstdout = os.dup(sys.stdout.fileno())
-    null = open(os.devnull, 'w')
-    os.dup2(null.fileno(), sys.stdout.fileno())
-    os.dup2(null.fileno(), sys.stderr.fileno())
-    yield
-    os.dup2(oldstderr, sys.stderr.fileno())
-    os.dup2(oldstdout, sys.stdout.fileno())
-    null.close()
 
 
 ceph_version_map = collections.OrderedDict(sorted({
@@ -40,20 +24,20 @@ def pre_build_ext(cmd_obj, version=None):
     elif version is None:
         comp = ccompiler.new_compiler(force=True, verbose=True)
         for potential_version, method in ceph_version_map.items():
-            sys.stdout.write("looking for librados >= %s (with %s)" %
-                             (potential_version, method))
-            sys.stdout.flush()
-            with output_redirected():
-                found = comp.has_function(method, libraries=['rados'])
+            msg = "* checking for librados >= %s (with function %s)" % (
+                potential_version, method)
+            print(msg)
+            found = comp.has_function(method, libraries=['rados'])
             if found:
                 version = potential_version
-                print(", FOUND")
+                print("%s done: FOUND" % msg)
             else:
-                print(", NOT FOUND")
+                print("%s done: NOT FOUND" % msg)
                 break
 
         if not version:
-            raise Exception("librados2 or librados-dev >= 0.80 are missing")
+            raise Exception("gcc, python-dev, librados2 or "
+                            "librados-dev >= 0.80 are missing")
 
     print("building cradox with %s api compatibility" % version)
 
@@ -72,6 +56,12 @@ def pre_build_ext(cmd_obj, version=None):
             template = Template(src.read())
             dst.write(template.render(version=version))
 
+    # Required by old version of setuptools
+    if cmd_obj is not None:
+        from Cython.Build import cythonize
+        cmd_obj.extensions = cythonize(cmd_obj.extensions)
+        for ext in cmd_obj.extensions:
+            ext._needs_stub = False
 
 if __name__ == '__main__':
     setup(
