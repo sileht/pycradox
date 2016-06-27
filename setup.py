@@ -42,18 +42,20 @@ def pre_build_ext(cmd_obj, version=None):
     print("building cradox with %s api compatibility" % version)
 
     # Generate the source file from template
+    from jinja2 import Environment
     from jinja2 import Template
+    env = Environment(trim_blocks=True, lstrip_blocks=True)
     cradox_out = os.path.join(os.path.dirname(__file__), 'cradox.pyx')
     cradox_in = "%s.in" % cradox_out
     with open(cradox_in, 'r') as src:
         with open(cradox_out, 'w') as dst:
-            template = Template(src.read())
+            template = env.from_string(src.read())
             dst.write(template.render(version=version))
     test_out = os.path.join(os.path.dirname(__file__), 'test_rados.py')
     test_in = "%s.in" % test_out
     with open(test_in, 'r') as src:
         with open(test_out, 'w') as dst:
-            template = Template(src.read())
+            template = env.from_string(src.read())
             dst.write(template.render(version=version))
 
     # Required by old version of setuptools

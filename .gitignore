@@ -8,6 +8,7 @@ dist
 a.out
 *.egg-info
 cradox.pyx
+test_rados.py
 build
 cython_debug
 .tox

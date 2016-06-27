@@ -214,7 +214,7 @@ class TestRados(object):
         eq(set(['a' * 500]), self.list_non_default_pools())
         self.rados.delete_pool('a' * 500)
 
-{% if version >= "hammer" and version < "jewel" %}
+{% if version >= "hammer" %}
     def test_get_pool_base_tier(self):
         self.rados.create_pool('foo')
         try:
@@ -228,7 +228,11 @@ class TestRados(object):
                 eq(ret, 0)
 
                 try:
+{% if version < "jewel" %}
                     cmd = {"prefix":"osd tier cache-mode", "pool":"foo-cache", "tierpool":"foo-cache", "mode":"readonly"}
+{% else %}
+                    cmd = {"prefix":"osd tier cache-mode", "pool":"foo-cache", "tierpool":"foo-cache", "mode":"readonly", "sure":"--yes-i-really-mean-it"}
+{% endif %}
                     ret, buf, errs = self.rados.mon_command(json.dumps(cmd), b'', timeout=30)
                     eq(ret, 0)
 
@@ -244,8 +248,8 @@ class TestRados(object):
                 self.rados.delete_pool('foo-cache')
         finally:
             self.rados.delete_pool('foo')
-{% endif %}
 
+{% endif %}
     def test_get_fsid(self):
         fsid = self.rados.get_fsid()
         eq(len(fsid), 36)
@@ -253,6 +257,7 @@ class TestRados(object):
 {% if version >= "hammer" %}
     def test_blacklist_add(self):
         self.rados.blacklist_add("1.2.3.4/123", 1)
+
 {% endif %}
     def test_get_cluster_stats(self):
         stats = self.rados.get_cluster_stats()
@@ -373,6 +378,7 @@ class TestIoctx(object):
         eq(sorted(object_names), [('', 'a'), ('','b'), ('','c'), ('','d'),\
                 ('ns1', 'd'), ('ns1', 'ns1-a'), ('ns1', 'ns1-b'),\
                 ('ns1', 'ns1-c'), ('ns1', 'ns1-d')])
+
 {% endif %}
     def test_xattrs(self):
         xattrs = dict(a=b'1', b=b'2', c=b'3', d=b'a\0b', e=b'\0')
@@ -491,7 +497,6 @@ class TestIoctx(object):
             eq(ret, 0)
             with assert_raises(ObjectNotFound):
                 self.ioctx.operate_read_op(read_op, "no_such")
-
 
     def test_get_omap_keys(self):
         keys = ("1", "2", "3")
@@ -722,7 +727,6 @@ class TestIoctx(object):
         eq(sys.getrefcount(comp), 2)
 
         [i.remove() for i in self.ioctx.list_objects()]
-
 {% else %}
     def test_aio_read(self):
         # this is a list so that the local cb() can modify it
@@ -787,8 +791,10 @@ class TestObject(object):
 
     def tearDown(self):
         self.ioctx.close()
+        self.ioctx = None
         self.rados.delete_pool('test_pool')
         self.rados.shutdown()
+        self.rados = None
 
     def test_read(self):
         eq(self.object.read(3), b'bar')
