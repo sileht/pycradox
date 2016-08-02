@@ -43,7 +43,6 @@ def pre_build_ext(cmd_obj, version=None):
 
     # Generate the source file from template
     from jinja2 import Environment
-    from jinja2 import Template
     env = Environment(trim_blocks=True, lstrip_blocks=True)
     cradox_out = os.path.join(os.path.dirname(__file__), 'cradox.pyx')
     cradox_in = "%s.in" % cradox_out
