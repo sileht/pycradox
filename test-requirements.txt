@@ -1,2 +1,3 @@
 Jinja2
 -e git+https://github.com/sileht/pifpaf.git#egg=pifpaf
+setuptools!=25.1.2
