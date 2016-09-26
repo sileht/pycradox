@@ -65,8 +65,14 @@ def pre_build_ext(cmd_obj, version=None):
             ext._needs_stub = False
 
 if __name__ == '__main__':
+    # NOTE(sileht): cython 0.25a0 need to have the file generated
+    # So we create this empty file, and the pre_build pbr hook
+    # will override and compile to real one.
+    with open("cradox.pyx", 'a'):
+        os.utime("cradox.pyx", None)
+
     setup(
-        setup_requires=['pbr', 'Cython!=0.25a0', 'Jinja2'],
+        setup_requires=['pbr', 'Cython', 'Jinja2'],
         pbr=True,
         ext_modules=[Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
     )
