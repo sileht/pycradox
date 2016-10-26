@@ -5,7 +5,7 @@ set -x
 
 version=$(python setup.py --version | sed 's/\.dev.*//')
 
-status=$(git status -sz)
+status=$(git status -sz | grep -v '\.eggs/' | xargs)
 [ -z "$status" ] || false
 git checkout master
 git push 
