@@ -66,7 +66,7 @@ def pre_build_ext(cmd_obj, version=None):
 
 if __name__ == '__main__':
     setup(
-        setup_requires=['pbr', 'Cython<0.25', 'Jinja2'],
+        setup_requires=['pbr', 'Cython', 'Jinja2'],
         pbr=True,
         ext_modules=[Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
     )
