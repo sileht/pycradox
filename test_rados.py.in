@@ -2,11 +2,7 @@ from __future__ import print_function
 from nose.tools import eq_ as eq, ok_ as ok, assert_raises
 from cradox import (Rados, Error, RadosStateError, Object, ObjectExists,
                    ObjectNotFound, ObjectBusy, requires, opt,
-{% if version >= "hammer" %}
                    ANONYMOUS_AUID, ADMIN_AUID, LIBRADOS_ALL_NSPACES, WriteOpCtx, ReadOpCtx,
-{% else %}
-                   ANONYMOUS_AUID, ADMIN_AUID, WriteOpCtx, ReadOpCtx,
-{% endif %}
                    LIBRADOS_SNAP_HEAD, LIBRADOS_OPERATION_BALANCE_READS, LIBRADOS_OPERATION_SKIPRWLOCKS, MonitorLog)
 import time
 import threading
@@ -96,9 +92,7 @@ class TestRadosStateError(object):
         assert_raises(RadosStateError, rados.pool_lookup, 'foo')
         assert_raises(RadosStateError, rados.pool_reverse_lookup, 0)
         assert_raises(RadosStateError, rados.create_pool, 'foo')
-{% if version >= "hammer" %}
         assert_raises(RadosStateError, rados.get_pool_base_tier, 0)
-{% endif %}
         assert_raises(RadosStateError, rados.delete_pool, 'foo')
         assert_raises(RadosStateError, rados.list_pools)
         assert_raises(RadosStateError, rados.get_fsid)
@@ -107,9 +101,7 @@ class TestRadosStateError(object):
         assert_raises(RadosStateError, rados.osd_command, 0, '', b'')
         assert_raises(RadosStateError, rados.pg_command, '', '', b'')
         assert_raises(RadosStateError, rados.wait_for_latest_osdmap)
-{% if version >= "hammer" %}
         assert_raises(RadosStateError, rados.blacklist_add, '127.0.0.1/123', 0)
-{% endif %}
 
     def test_configuring(self):
         rados = Rados(conffile='')
@@ -216,7 +208,6 @@ class TestRados(object):
         eq(set(['a' * 500]), self.list_non_default_pools())
         self.rados.delete_pool('a' * 500)
 
-{% if version >= "hammer" %}
     def test_get_pool_base_tier(self):
         self.rados.create_pool('foo')
         try:
@@ -251,16 +242,13 @@ class TestRados(object):
         finally:
             self.rados.delete_pool('foo')
 
-{% endif %}
     def test_get_fsid(self):
         fsid = self.rados.get_fsid()
         eq(len(fsid), 36)
 
-{% if version >= "hammer" %}
     def test_blacklist_add(self):
         self.rados.blacklist_add("1.2.3.4/123", 1)
 
-{% endif %}
     def test_get_cluster_stats(self):
         stats = self.rados.get_cluster_stats()
         assert stats['kb'] > 0
@@ -363,7 +351,6 @@ class TestIoctx(object):
         object_names = [obj.key for obj in self.ioctx.list_objects()]
         eq(sorted(object_names), ['a', 'b', 'c', 'd'])
 
-{% if version >= "hammer" %}
     def test_list_ns_objects(self):
         self.ioctx.write('a', b'')
         self.ioctx.write('b', b'foo')
@@ -381,7 +368,6 @@ class TestIoctx(object):
                 ('ns1', 'd'), ('ns1', 'ns1-a'), ('ns1', 'ns1-b'),\
                 ('ns1', 'ns1-c'), ('ns1', 'ns1-d')])
 
-{% endif %}
     def test_xattrs(self):
         xattrs = dict(a=b'1', b=b'2', c=b'3', d=b'a\0b', e=b'\0')
         self.ioctx.write('abc', b'')
@@ -743,11 +729,6 @@ class TestIoctx(object):
         r, _, _ = self.rados.mon_command(json.dumps(cmd), b'')
         eq(r, 0)
 
-{#
- NOTE(sileht): ceph osd down doesn't work well on <= hammer
- so we disable that event that reduces a bit the aio_read tests.
-#}
-{% if version >= "hammer" %}
     def test_aio_read(self):
         # this is a list so that the local cb() can modify it
         retval = [None]
@@ -817,26 +798,6 @@ class TestIoctx(object):
         eq(sys.getrefcount(comp), 2)
 
         [i.remove() for i in self.ioctx.list_objects()]
-{% else %}
-    def test_aio_read(self):
-        # this is a list so that the local cb() can modify it
-        retval = [None]
-        lock = threading.Condition()
-        def cb(_, buf):
-            with lock:
-                retval[0] = buf
-                lock.notify()
-        payload = b"bar\000frob"
-        self.ioctx.write("foo", payload)
-
-        comp = self.ioctx.aio_read("foo", len(payload), 0, cb)
-        time.sleep(3)
-        eq(True, comp.is_complete())
-        eq(retval[0], payload)
-        eq(sys.getrefcount(comp), 2)
-
-        [i.remove() for i in self.ioctx.list_objects()]
-{% endif %}
 
     def test_lock(self):
         self.ioctx.lock_exclusive("foo", "lock", "locker", "desc_lock",

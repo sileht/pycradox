@@ -4,17 +4,17 @@ branches:
 sudo: required
 dist: trusty
 language: python
-cache: 
+cache:
  - apt
  - pip
 python:
     - 2.7
     - 3.5
 env:
-    - CEPH_RELEASE=firefly
     - CEPH_RELEASE=hammer
     - CEPH_RELEASE=infernalis
     - CEPH_RELEASE=jewel
+    - CEPH_RELEASE=kraken
 before_install:
     - curl 'https://git.ceph.com/?p=ceph.git;a=blob_plain;f=keys/release.asc' | sudo apt-key add -
     - echo deb http://download.ceph.com/debian-$CEPH_RELEASE/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list
