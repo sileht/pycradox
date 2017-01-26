@@ -12,9 +12,9 @@ from setuptools import setup
 
 
 ceph_version_map = collections.OrderedDict(sorted({
-    "firefly": "rados_connect",
     "hammer": "rados_pool_get_base_tier",
     "jewel": "rados_inconsistent_pg_list",
+    "kraken": "rados_aio_exec",
 }.items(), key=lambda t: t[0]))
 
 

@@ -18,7 +18,9 @@ Python libraries for the Ceph librados library with use cython instead of ctypes
 
 This a standalone library initially comes from this Ceph PR https://github.com/ceph/ceph/pull/7621
 
-But can be built against older version of Ceph from 0.80.X (firefly) to 10.1.X (perhaps more not tested)
+But can be built against older version of Ceph from 0.94.X (hammer) to 11.0.X (perhaps more not tested)
+
+(For firefly support use branch stable/1.x or version < 2.0)
 
 This is designed for application that want to use a recent python-rados API without upgrading
 the whole ceph cluster.
