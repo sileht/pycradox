@@ -11,7 +11,7 @@ import errno
 import sys
 
 # Are we running Python 2.x
-_python2 = sys.hexversion < 0x03000000
+_python2 = sys.version_info[0] < 3
 
 def test_rados_init_error():
     assert_raises(Error, Rados, conffile='', rados_id='admin',
@@ -144,7 +144,10 @@ class TestRados(object):
         ret, buf, out = self.rados.mon_command(json.dumps(cmd), b'')
         for mon in json.loads(buf.decode('utf8'))['mons']:
             while True:
-                buf = json.loads(self.rados.ping_monitor(mon['name']))
+                output = self.rados.ping_monitor(mon['name'])
+                if output is None:
+                    continue
+                buf = json.loads(output)
                 if buf.get('health'):
                     break
 
