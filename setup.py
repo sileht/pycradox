@@ -12,8 +12,6 @@ from setuptools import setup
 
 
 ceph_version_map = collections.OrderedDict(sorted({
-    "hammer": "rados_pool_get_base_tier",
-    "jewel": "rados_inconsistent_pg_list",
     "kraken": "rados_aio_exec",
 }.items(), key=lambda t: t[0]))
 
@@ -37,7 +35,7 @@ def pre_build_ext(cmd_obj, version=None):
 
         if not version:
             raise Exception("gcc, python-dev, librados2 or "
-                            "librados-dev >= 0.80 are missing")
+                            "librados-dev >= 11.2.0 are missing")
 
     print("building cradox with %s api compatibility" % version)
 
@@ -63,6 +61,7 @@ def pre_build_ext(cmd_obj, version=None):
         cmd_obj.extensions = cythonize(cmd_obj.extensions)
         for ext in cmd_obj.extensions:
             ext._needs_stub = False
+
 
 if __name__ == '__main__':
     setup(
