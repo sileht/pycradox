@@ -2,9 +2,12 @@
 #
 #
 
+from __future__ import print_function
+
 import collections
 import os
 import os.path
+import sys
 
 from distutils import ccompiler
 from setuptools import Extension
@@ -16,6 +19,10 @@ ceph_version_map = collections.OrderedDict(sorted({
 }.items(), key=lambda t: t[0]))
 
 
+def log(msg):
+    print(msg, file=sys.stderr)
+
+
 def setup_hook(cmd_obj, version=None):
     if version == "latest":
         version = sorted(ceph_version_map.keys())[-1]
@@ -24,20 +31,20 @@ def setup_hook(cmd_obj, version=None):
         for potential_version, method in ceph_version_map.items():
             msg = "* checking for librados >= %s (with function %s)" % (
                 potential_version, method)
-            print(msg)
+            log(msg)
             found = comp.has_function(method, libraries=['rados'])
             if found:
                 version = potential_version
-                print("%s done: FOUND" % msg)
+                log("%s done: FOUND" % msg)
             else:
-                print("%s done: NOT FOUND" % msg)
+                log("%s done: NOT FOUND" % msg)
                 break
 
         if not version:
             raise Exception("gcc, python-dev, librados2 or "
                             "librados-dev >= 0.80 are missing")
 
-    print("building cradox with %s api compatibility" % version)
+    log("building cradox with %s api compatibility" % version)
 
     # Generate the source file from template
     from jinja2 import Environment
