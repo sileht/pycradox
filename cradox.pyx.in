@@ -144,7 +144,9 @@ cdef extern from "rados/librados.h" nogil:
     int rados_pool_get_base_tier(rados_t cluster, int64_t pool, int64_t *base_tier)
     int rados_pool_list(rados_t cluster, char *buf, size_t len)
     int rados_pool_delete(rados_t cluster, const char *pool_name)
+{% if version >= "jewel" %}
     int rados_inconsistent_pg_list(rados_t cluster, int64_t pool, char *buf, size_t len)
+{% endif %}
 
     int rados_cluster_stat(rados_t cluster, rados_cluster_stat_t *result)
     int rados_cluster_fsid(rados_t cluster, char *buf, size_t len)
@@ -155,10 +157,12 @@ cdef extern from "rados/librados.h" nogil:
                           const char *inbuf, size_t inbuflen,
                           char **outbuf, size_t *outbuflen,
                           char **outs, size_t *outslen)
+{% if version >= "kraken" %}
     int rados_mgr_command(rados_t cluster, const char **cmd, size_t cmdlen,
                           const char *inbuf, size_t inbuflen,
                           char **outbuf, size_t *outbuflen,
                           char **outs, size_t *outslen)
+{% endif %}
     int rados_mon_command_target(rados_t cluster, const char *name, const char **cmd, size_t cmdlen,
                                  const char *inbuf, size_t inbuflen,
                                  char **outbuf, size_t *outbuflen,
@@ -243,8 +247,10 @@ cdef extern from "rados/librados.h" nogil:
 
     int rados_exec(rados_ioctx_t io, const char * oid, const char * cls, const char * method,
                    const char * in_buf, size_t in_len, char * buf, size_t out_len)
+{% if version >= "kraken" %}
     int rados_aio_exec(rados_ioctx_t io, const char * oid, rados_completion_t completion, const char * cls, const char * method,
                        const char * in_buf, size_t in_len, char * buf, size_t out_len)
+{% endif %}
 
     int rados_write_op_operate(rados_write_op_t write_op, rados_ioctx_t io, const char * oid, time_t * mtime, int flags)
     int rados_aio_write_op_operate(rados_write_op_t write_op, rados_ioctx_t io, rados_completion_t completion, const char *oid, time_t *mtime, int flags)
@@ -593,7 +599,11 @@ cdef class Rados(object):
         elif name is None:
             name = 'client.admin'
         if clustername is None:
+{% if version >= "jewel" %}
             clustername = ''
+{% else %}
+            clustername = 'ceph'
+{% endif %}
 
         name = cstr(name, 'name')
         clustername = cstr(clustername, 'clustername')
@@ -1050,6 +1060,7 @@ Rados object in state %s." % self.state)
         if ret < 0:
             raise make_ex(ret, "error deleting pool '%s'" % pool_name)
 
+{% if version >= "jewel" %}
     @requires(('pool_id', int))
     def get_inconsistent_pgs(self, pool_id):
         """
@@ -1081,6 +1092,7 @@ Rados object in state %s." % self.state)
         finally:
             free(pgs)
 
+{% endif %}
     def list_pools(self):
         """
         Gets a list of pool names.
@@ -1263,6 +1275,7 @@ Rados object in state %s." % self.state)
         finally:
             free(_cmd)
 
+{% if version >= "kraken" %}
     def mgr_command(self, cmd, inbuf, timeout=0):
         """
         returns (int ret, string outbuf, string outs)
@@ -1304,6 +1317,7 @@ Rados object in state %s." % self.state)
         finally:
             free(_cmd)
 
+{% endif %}
     def pg_command(self, pgid, cmd, inbuf, timeout=0):
         """
         pg_command(pgid, cmd, inbuf, outbuf, outbuflen, outs, outslen)
@@ -2267,6 +2281,7 @@ cdef class Ioctx(object):
             raise make_ex(ret, "error reading %s" % object_name)
         return completion
 
+{% if version >= "kraken" %}
     @requires(('object_name', str_type), ('cls', str_type), ('method', str_type),
               ('data', (bytes, bytearray)), ('length', int),
               ('oncomplete', opt(Callable)), ('onsafe', opt(Callable)))
@@ -2338,6 +2353,7 @@ cdef class Ioctx(object):
             raise make_ex(ret, "error executing %s::%s on %s" % (cls, method, object_name))
         return completion
 
+{% endif %}
     @requires(('object_name', str_type), ('oncomplete', opt(Callable)), ('onsafe', opt(Callable)))
     def aio_remove(self, object_name, oncomplete=None, onsafe=None):
         """

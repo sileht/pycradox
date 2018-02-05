@@ -224,7 +224,11 @@ class TestRados(object):
                 eq(ret, 0)
 
                 try:
+{% if version < "jewel" %}
+                    cmd = {"prefix":"osd tier cache-mode", "pool":"foo-cache", "tierpool":"foo-cache", "mode":"readonly"}
+{% else %}
                     cmd = {"prefix":"osd tier cache-mode", "pool":"foo-cache", "tierpool":"foo-cache", "mode":"readonly", "sure":"--yes-i-really-mean-it"}
+{% endif %}
                     ret, buf, errs = self.rados.mon_command(json.dumps(cmd), b'', timeout=30)
                     eq(ret, 0)
 
@@ -855,6 +859,7 @@ class TestIoctx(object):
         ret, buf = self.ioctx.execute("foo", "hello", "say_hello", b"nose")
         eq(buf, b"Hello, nose!")
 
+{% if version >= "kraken" %}
     def test_aio_execute(self):
         count = [0]
         retval = [None]
@@ -885,6 +890,7 @@ class TestIoctx(object):
         eq(retval[0], b"Hello, nose!")
 
         [i.remove() for i in self.ioctx.list_objects()]
+{% endif %}
 
 class TestObject(object):
 
