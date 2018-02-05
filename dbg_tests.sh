@@ -46,6 +46,6 @@ for i in $(rados lspools | grep -e foo -e test_pool -e foo-cache -e 黄 -e 黅) 
 	rados rmpool $i $i --yes-i-really-really-mean-it ; 
 done ; 
 
-$python -c "import setup; setup.pre_build_ext(None)"
+$python -c "import setup; setup.setup_hook()"
 $python setup.py build_ext --inplace $opt_setup --build-lib .
 $launcher $python $(which nosetests) -vds test_rados$tests

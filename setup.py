@@ -16,7 +16,7 @@ ceph_version_map = collections.OrderedDict(sorted({
 }.items(), key=lambda t: t[0]))
 
 
-def pre_build_ext(cmd_obj, version=None):
+def setup_hook(cmd_obj, version=None):
     if version == "latest":
         version = sorted(ceph_version_map.keys())[-1]
     elif version is None:
@@ -54,13 +54,6 @@ def pre_build_ext(cmd_obj, version=None):
         with open(test_out, 'w') as dst:
             template = env.from_string(src.read())
             dst.write(template.render(version=version))
-
-    # Required by old version of setuptools
-    if cmd_obj is not None:
-        from Cython.Build import cythonize
-        cmd_obj.extensions = cythonize(cmd_obj.extensions)
-        for ext in cmd_obj.extensions:
-            ext._needs_stub = False
 
 
 if __name__ == '__main__':
