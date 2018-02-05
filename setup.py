@@ -10,7 +10,6 @@ from distutils import ccompiler
 from setuptools import Extension
 from setuptools import setup
 
-
 ceph_version_map = collections.OrderedDict(sorted({
     "jewel": "rados_inconsistent_pg_list",
     "kraken": "rados_aio_exec",
@@ -62,6 +61,7 @@ def pre_build_ext(cmd_obj, version=None):
         cmd_obj.extensions = cythonize(cmd_obj.extensions)
         for ext in cmd_obj.extensions:
             ext._needs_stub = False
+
 
 if __name__ == '__main__':
     setup(
