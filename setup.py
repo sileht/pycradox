@@ -16,6 +16,7 @@ from setuptools import setup
 ceph_version_map = collections.OrderedDict(sorted({
     "jewel": "rados_inconsistent_pg_list",
     "kraken": "rados_aio_exec",
+    "luminous": "rados_read_op_omap_get_keys2",
 }.items(), key=lambda t: t[0]))
 
 
