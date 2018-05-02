@@ -13,6 +13,8 @@ cradox
    :target: https://pypi.python.org/pypi/cradox/
    :alt: Downloads
 
+/!\ DON'T USE IT, but use upstream python-rados, except you really can't /!\
+
 Python libraries for the Ceph librados library with use cython instead of ctypes
 
 This a standalone library initially comes from this Ceph PR https://github.com/ceph/ceph/pull/7621
