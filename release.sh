@@ -3,7 +3,8 @@
 set -e
 set -x
 
-version=$(python setup.py --version | sed 's/\.dev.*//')
+version="$1"
+[ -z "$version"] && version=$(python setup.py --version | sed 's/\.dev.*//')
 
 status=$(git status -sz | grep -v '\.eggs/' | xargs)
 [ -z "$status" ] || false
