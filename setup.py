@@ -14,6 +14,7 @@ from setuptools import Extension
 from setuptools import setup
 
 ceph_version_map = collections.OrderedDict(sorted({
+    "hammer": "rados_pool_get_base_tier",
     "jewel": "rados_inconsistent_pg_list",
     "kraken": "rados_aio_exec",
     "luminous": "rados_read_op_omap_get_keys2",
