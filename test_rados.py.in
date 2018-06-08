@@ -31,8 +31,10 @@ def test_rados_init():
 
 def test_ioctx_context_manager():
     with Rados(conffile='', rados_id='admin') as conn:
-        with conn.open_ioctx('rbd') as ioctx:
+        conn.create_pool('newrbd')
+        with conn.open_ioctx('newrbd') as ioctx:
             pass
+        conn.delete_pool('newrbd')
 
 def test_parse_argv():
     args = ['osd', 'pool', 'delete', 'foobar', 'foobar', '--yes-i-really-really-mean-it']
@@ -252,12 +254,14 @@ class TestRados(object):
     def test_blacklist_add(self):
         self.rados.blacklist_add("1.2.3.4/123", 1)
 
+{% if version < "luminous" %}
     def test_get_cluster_stats(self):
         stats = self.rados.get_cluster_stats()
         assert stats['kb'] > 0
         assert stats['kb_avail'] > 0
         assert stats['kb_used'] > 0
         assert stats['num_objects'] >= 0
+{% endif %}
 
     def test_monitor_log(self):
         lock = threading.Condition()
