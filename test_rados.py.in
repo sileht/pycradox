@@ -880,7 +880,7 @@ class TestIoctx(object):
         if not release or release[0] < 'l':
             raise SkipTest
 
-        eq([], self.ioctx.application_list())
+        eq([], list(self.ioctx.application_list()))
 
         self.ioctx.application_enable("app1")
         assert_raises(Error, self.ioctx.application_enable, "app2")
