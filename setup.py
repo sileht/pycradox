@@ -68,7 +68,8 @@ def setup_hook(cmd_obj, version=None):
 if __name__ == '__main__':
     setup(
         # cradox segfault with 0.28.0
-        setup_requires=['pbr', 'Cython!=0.28.0,!=0.28.1,!=0.28.2,!=0.28.3',
+        setup_requires=['pbr',
+                        'Cython!=0.28.0,!=0.28.1,!=0.28.2,!=0.28.3,!=0.28.4',
                         'Jinja2'],
         pbr=True,
         ext_modules=[Extension("cradox", ["cradox.pyx"], libraries=["rados"])],
